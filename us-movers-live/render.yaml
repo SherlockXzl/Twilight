@@ -1,0 +1,12 @@
+services:
+  - type: web
+    name: us-movers-live
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    plan: starter
+    healthCheckPath: /healthz
+    envVars:
+      - key: SOURCE
+        value: finviz
+      - key: REFRESH_SECONDS
+        value: "60"

@@ -1,0 +1,446 @@
+:root{
+  --bg:#f2f4f7; --card:#ffffff; --ink:#16191d; --ink2:#59616c; --ink3:#8b939e;
+  --line:#e3e7ec; --red:#c8102e; --green:#0a7d4b; --blue:#1554b0; --amber:#98670a;
+
+  /* 站点名的品牌色（--brand-dawn / --brand-night）已随"改回常规字体颜色"一并移除
+     （2026-09-22）。当初采样自 logo 笔画的实色是 太阳金 #fcb13a、月亮蓝 #385999；
+     要用时记住金色必须压深到 #c97600 —— 原金在白底只有 1.83:1 对比度，当标题也不达标。
+     取值与踩过的坑记在「站点标」一节的注释里，没有丢。 */
+
+  /* ---------- 字号比例 ----------
+     全站字号统一走这套变量，想整体放大/缩小只改这 7 个值即可，不要在各处写裸 px。
+     本轮整体上调了一号（约 +1~2px），同时同步放大了行高与内边距。 */
+  --fs-1:12px;     /* 角标、迷你标签 */
+  --fs-2:13.5px;   /* 次要说明、徽章、按钮、表格里的行业列 */
+  --fs-3:14.5px;   /* 标签页、表格正文、输入框 */
+  --fs-4:15px;     /* 正文、导航项 */
+  --fs-5:16px;     /* 卡片小标题 */
+  --fs-6:21px;     /* 站点名 */
+  --fs-7:23px;     /* 页面标题 */
+  --lh:1.6;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font-size:var(--fs-4);line-height:var(--lh);
+  font-family:-apple-system,BlinkMacSystemFont,"PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;
+  -webkit-font-smoothing:antialiased}
+
+/* ---------- 左侧菜单 + 主区 ---------- */
+.app{display:flex;min-height:100vh;align-items:stretch}
+.sidebar{width:212px;flex:0 0 212px;background:#fff;border-right:1px solid var(--line);
+  padding:22px 16px;display:flex;flex-direction:column;gap:20px}
+/* ---------- 站点标（页面最左上角）----------
+   左图右文的标准 lockup：logo.png + 站点名 + 副标题。
+   见 shell.js 的 renderSidebar —— 那里注明了为什么图用 <img> 而不是背景图。 */
+.brand{padding:0 8px;display:flex;align-items:center;gap:10px}
+.brand-logo{width:38px;height:38px;flex:0 0 auto;display:block}
+/* 站点名：**常规字体 + 常规颜色**，也就是跟全站正文同一套 ——
+   字体什么都不写，继承 body 的 -apple-system / PingFang SC 系统栈；
+   颜色用 --ink（页面正文色），字重 600、字距 1.5px 拉开一点，读起来仍是个名字。
+
+   2026-09-22 曾试过"三字三种处理"：宋体 + 晨金/昏蓝分色，「线」再单做白底黑描边。
+   当天按用户要求全部改回常规。要重新上色时，几条实测结论别丢（详见 README「站点标」）：
+     · 金色不能直接用 logo 原色，原金 #fcb13a 在白底只有 1.83:1 对比度，当 21px
+       标题用也不达标（需 ≥3:1）；压深到 #c97600 才有 3.46:1。
+     · 「线」若要做白底黑描边，字体必须换成笔画均匀的黑体系 —— 宋体横画在 21px 下
+       仅约 1px，描边一往里收就把白芯夹死，整字变黑疙瘩。
+     · 白字没描边就是白底上的隐形字；这类改动一律要算对比度、不能靠肉眼。 */
+.brand-mark{font-size:var(--fs-6);font-weight:600;letter-spacing:1.5px;color:var(--ink)}
+.brand-sub{font-size:var(--fs-1);color:var(--ink3);margin-top:4px;letter-spacing:.3px}
+.nav{display:flex;flex-direction:column;gap:5px}
+.nav-item{display:flex;align-items:center;gap:10px;padding:10px 12px;border-radius:8px;
+  text-decoration:none;color:var(--ink2);font-size:var(--fs-4);border:1px solid transparent}
+.nav-item:hover{background:#f4f6f9;color:var(--ink)}
+.nav-item.on{background:#eaf1fb;border-color:#c8dcf5;color:var(--blue);font-weight:500}
+/* 菜单图标：尺寸由这里控制，颜色走 currentColor —— 未选中继承 --ink2、悬停变 --ink、
+   选中变 --blue（个别项用 accent 覆盖），全部由 .nav-item 的规则自动带出，不需要单独写状态配色。
+   图标框宽度固定，各图按自身宽高比居中内缩，这样不同形状的图标不会把文字顶得左右不齐：
+   走势图宽扁，占满 23x17.6；太阳与月亮接近正方，收到 18x18，避免视觉上比走势图重。 */
+.nav-item .icon{width:23px;height:18px;flex:0 0 auto;display:block}
+/* 个别菜单项选中时的图标色可以单独覆盖（NAV 里的 accent），文字仍跟站点蓝走。
+   注意亮绿 #75c82b 在浅蓝底上对比度只有约 1.8:1，属于偏弱的组合；
+   若哪天觉得发虚，把 shell.js 里该项的 accent 去掉即可回到站点蓝。 */
+.nav-item.on .icon{color:var(--icon-accent,currentColor)}
+/* 主区铺满可用宽度。
+   原先这里写死 max-width:1480px —— 在宽屏上会留下一条用不上的空白地带：
+   实测 2302px 视口下（212px 侧栏 + 52px 内边距），主区只能占 1480px，
+   右侧约 610px（26%）永远是空的。
+   现在不设上限，宽度交给各区块自己分配：
+   宽表格（异动榜 / 夜盘异动）铺满整行，短字段的卡片型区块两列并排
+   （见文件末尾「宽屏」一节）。组件本身都是 flex/grid 自适应，不会溢出。 */
+.main{flex:1 1 auto;min-width:0;padding:24px 30px 72px}
+
+header.top{display:flex;flex-wrap:wrap;gap:16px;align-items:flex-end;justify-content:space-between;margin-bottom:18px}
+h1{font-size:var(--fs-7);margin:0 0 6px;letter-spacing:-.3px}
+.hint{color:var(--ink3);font-size:var(--fs-2)}
+.badges{display:flex;flex-wrap:wrap;gap:9px;align-items:center}
+.badge{display:inline-flex;align-items:center;gap:7px;background:var(--card);border:1px solid var(--line);
+  border-radius:999px;padding:6px 13px;font-size:var(--fs-2);color:var(--ink2)}
+.dot{width:8px;height:8px;border-radius:50%;background:var(--ink3)}
+.dot.live{background:#12a150;box-shadow:0 0 0 3px rgba(18,161,80,.16)}
+.dot.off{background:#b0b6bf}
+button{font:inherit;cursor:pointer;background:var(--card);border:1px solid var(--line);border-radius:8px;
+  padding:7px 15px;color:var(--ink);font-size:var(--fs-2)}
+button:hover{border-color:#c3cad3}
+button.primary{background:var(--blue);border-color:var(--blue);color:#fff}
+/* 禁用态（夜盘已收盘时的「立即刷新」，见 shell.js 的 paintRefreshBtn）。
+   要**同时压掉 primary 的蓝底和 hover 的描边**，否则鼠标划过时灰按钮会"亮"一下，
+   又变成像可点的了 —— 那正是置灰想避免的误读。
+   :disabled:hover 的优先级高于 button:hover，所以能压住。 */
+button:disabled,button.primary:disabled{cursor:not-allowed;color:var(--ink2);
+  background:var(--line);border-color:var(--line)}
+button:disabled:hover{border-color:var(--line)}
+
+.panel{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:16px 18px;margin-bottom:16px}
+.panel.warn{background:#fff8ea;border-color:#f0dcb4;color:#6b4a00}
+.panel.err{background:#fdf2f2;border-color:#f2d4d4;color:#7a2b2b}
+.panel h2{font-size:var(--fs-5);margin:0 0 12px;font-weight:500}
+.panel p.hint{margin:8px 0}
+
+/* ---------- 标签页的两种身份（不要合并）----------
+   站内有两组「长得像标签」的东西，语义完全不同，必须一眼分得开：
+
+   1) 子页面切换 → .tabs--page
+      目前只有早盘总结顶部那一组（「总览 / 个股」）。切换的是**整块内容**，等于换了一页。
+      用分段控件：灰底凹槽 + 选中项白色凸起，有明确外框，是"页面级"控件，
+      视觉重量大、字号跟正文同级。
+
+   2) 分档筛选 → .tabs--filter
+      两页都有：夜盘异动顶部的「所有 / 大市值 / 小市值」，以及早盘「个股异动榜」
+      面板内的同一组 chip。切换的是**同一张表上的过滤条件**，表格还在原地。
+      用药丸 chip：不要外框、字号小一号、描边轻，选中 = 实心填充（"这个筛选项是开着的"）。
+      前面挂一个「分档」小标签，一句话说清它是筛选项而不是页面。
+
+   分档在两页共用同一个修饰类，是刻意的：「大市值」在两页必须是同一个意思、同一种长相，
+   读者不用记两套。页面级 vs 筛选级的区别则靠修饰类本身来分。
+
+   为什么必须分开：两者样式一样时，读者会把「所有 / 大市值」也当成换页控件，
+   点下去发现只是筛行、视野没动，就会怀疑"点了没反应"（夜盘页真实踩过这个坑）。 */
+.tabs{display:flex;flex-wrap:wrap;gap:7px;margin-bottom:10px}
+.criteria{margin:0 0 16px;padding-left:2px;line-height:1.75}
+/* 分档口径行（早盘「个股异动榜」里跟在 chip 下面那行）：字号最小一档，
+   作用与夜盘异动页的 .criteria 相同 —— 把当前生效的边界值写出来，别让人猜。 */
+.band-note{margin:-4px 0 12px;padding-left:2px;font-size:var(--fs-1);
+  line-height:1.7;color:var(--ink3)}
+.tab{border:1px solid var(--line);background:var(--card);border-radius:999px;padding:7px 16px;
+  font-size:var(--fs-3);color:var(--ink2)}
+.tab.on{background:#eaf1fb;border-color:#bcd3f0;color:var(--blue);font-weight:500}
+.tab .n{opacity:.7;margin-left:5px;font-variant-numeric:tabular-nums}
+
+/* --- 1) 子页面切换：分段控件（早盘总结 总览 / 个股）--- */
+.tabs--page{display:inline-flex;flex-wrap:nowrap;gap:3px;max-width:100%;
+  background:#e8ecf1;border:1px solid var(--line);border-radius:11px;padding:3px;margin-bottom:16px}
+.tabs--page .tab{border:1px solid transparent;background:transparent;border-radius:8px;
+  padding:8px 28px;font-size:var(--fs-4);color:var(--ink2);
+  transition:background .12s,color .12s}
+.tabs--page .tab:hover{background:rgba(255,255,255,.6);color:var(--ink)}
+/* 选中 = 白色凸起块（选择器比 .tab.on 更具体，无需 !important） */
+.tabs--page .tab.on,
+.tabs--page .tab.on:hover{background:#fff;border-color:#dbe2ea;color:var(--ink);
+  font-weight:600;box-shadow:0 1px 2px rgba(22,25,29,.12)}
+
+/* --- 2) 分档筛选：药丸 chip（夜盘异动 + 早盘「个股异动榜」共用）--- */
+.tabs--filter{align-items:center;gap:7px}
+/* 「分档」前置标签只在有内容时出现 —— 空容器（加载中 / 取数失败）不留一个孤零零的词 */
+.tabs--filter:not(:empty)::before{content:"分档";flex:0 0 auto;margin-right:1px;
+  font-size:var(--fs-1);color:var(--ink3);letter-spacing:.6px}
+.tabs--filter .tab{border-color:#dbe2ea;background:transparent;border-radius:999px;
+  padding:5px 14px;font-size:var(--fs-2);color:var(--ink2);
+  transition:background .12s,border-color .12s,color .12s}
+.tabs--filter .tab:hover{border-color:#b9c4d0;color:var(--ink)}
+/* 选中 = 实心填充，表示"这个筛选项是开着的" */
+.tabs--filter .tab.on,
+.tabs--filter .tab.on:hover{background:var(--blue);border-color:var(--blue);color:#fff;font-weight:500}
+.tabs--filter .tab .n{opacity:.8}
+
+.toolbar{display:flex;flex-wrap:wrap;gap:12px;align-items:center;margin-bottom:14px}
+/* 「显示 N 条 / 共 M 条」推到工具条最右端 —— 宽屏下中间那段空白由它兜住，
+   否则控件都挤在左边、右边一片空。窄屏换行时它也只是右对齐，不会错位。 */
+#rowInfo,#mvRowInfo{margin-left:auto}
+input[type=search]{font:inherit;font-size:var(--fs-3);padding:8px 14px;border:1px solid var(--line);
+  border-radius:8px;background:var(--card);min-width:260px;color:var(--ink)}
+
+/* ---------- 带搜索的下拉（组件见 combo.js）----------
+   原生 <select> 不支持在选项里输入搜索，所以自己实现：按钮 + 浮层（搜索框 + 选项列表）。 */
+.combo{position:relative;flex:0 1 auto;width:190px}
+.combo-btn{display:flex;align-items:center;gap:8px;width:100%;
+  font:inherit;font-size:var(--fs-3);padding:8px 12px 8px 14px;
+  border:1px solid var(--line);border-radius:8px;background:var(--card);
+  color:var(--ink3);text-align:left;cursor:pointer}
+/* 未选中时用次要灰（提示"还没筛"），选中后用正文色 */
+.combo.has-val .combo-btn{color:var(--ink)}
+.combo.open .combo-btn{border-color:#bcd3f0;background:#fbfdff}
+.combo-txt{flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.combo-ar{flex:0 0 auto;font-size:var(--fs-1);color:var(--ink3)}
+/* 浮层比按钮宽 —— 行业名（「制药·特色药与仿制药 (1)」）塞不进 190px，
+   按钮里省略号截断、列表里完整显示，是这里想要的行为 */
+.combo-pop{position:absolute;top:calc(100% + 5px);left:0;z-index:30;
+  width:max-content;min-width:100%;max-width:330px;
+  background:var(--card);border:1px solid var(--line);border-radius:8px;
+  box-shadow:0 8px 22px rgba(22,25,29,.12);padding:8px}
+.combo-q{width:100%;font:inherit;font-size:var(--fs-2);padding:6px 10px;
+  border:1px solid var(--line);border-radius:6px;background:#f7f9fb;color:var(--ink)}
+.combo-list{list-style:none;margin:6px 0 0;padding:0;max-height:264px;overflow-y:auto}
+.combo-i{padding:6px 10px;border-radius:6px;font-size:var(--fs-3);color:var(--ink2);cursor:pointer}
+.combo-i:hover,.combo-i.hi{background:#f2f6fb;color:var(--ink)}
+.combo-i.on{color:var(--blue);font-weight:500}
+.combo-none{padding:6px 10px;font-size:var(--fs-2);color:var(--ink3)}
+
+.tblwrap{overflow-x:auto;border:1px solid var(--line);border-radius:10px;background:var(--card)}
+table{border-collapse:collapse;width:100%;min-width:1160px;font-size:var(--fs-3)}
+thead th{position:sticky;top:0;background:#eef1f5;color:#3d454f;font-weight:600;text-align:left;
+  padding:11px 13px;border-bottom:1px solid var(--line);white-space:nowrap;z-index:2}
+/* 数值列（价格 / 涨跌幅 / 总市值）的表头必须跟单元格一样右对齐。
+   原先表头一律左对齐、单元格 td.num 右对齐，两者右边缘差 30~50px ——
+   表面看是"表格没对齐"，实际是表头与数值用了两种对齐方式。
+   注意：表头单元格的左右内边距与 td 一致（都是 13px），所以右对齐后
+   表头文字右边缘与数字右边缘会严格重合，不需要额外补偿。 */
+thead th.num{text-align:right}
+tbody td{padding:10px 13px;border-bottom:1px solid #f1f3f6;vertical-align:top}
+tbody tr:last-child td{border-bottom:none}
+tbody tr:hover{background:#fafbfd}
+td.code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-weight:600;white-space:nowrap}
+td.name{min-width:200px}
+td.num{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+td.sec,td.ind{color:var(--ink2);font-size:var(--fs-2);min-width:140px}
+td.act{white-space:nowrap}
+td.act a{color:var(--blue);text-decoration:none;font-size:var(--fs-2)}
+td.act a:hover{text-decoration:underline}
+.chg{font-weight:600;font-variant-numeric:tabular-nums}
+.chg.up{color:var(--red)} .chg.down{color:var(--green)}
+.band{display:inline-block;font-size:var(--fs-1);white-space:nowrap;border-radius:4px;padding:2px 8px;border:1px solid}
+.band.up{color:var(--red);background:#fdf0f2;border-color:#f2d3d8}
+.band.down{color:var(--green);background:#eef7f2;border-color:#cfe7dc}
+.empty{padding:32px;text-align:center;color:var(--ink3);font-size:var(--fs-3)}
+details.excl summary{cursor:pointer;font-size:var(--fs-4);color:var(--ink2);margin-bottom:12px}
+
+/* ---------- 窄屏：左侧菜单折成顶部横条 ---------- */
+@media(max-width:760px){
+  .app{flex-direction:column}
+  .sidebar{width:100%;flex:none;flex-direction:row;align-items:center;gap:18px;
+    border-right:none;border-bottom:1px solid var(--line);padding:13px 16px;overflow-x:auto}
+  .brand{padding:0;flex:0 0 auto;gap:8px}
+  /* 窄屏顶部横条高度有限，站点标收到 28px（再小 logo 里的日/月就糊成一团了），
+     副标题让位。字号同步收小，两行 lockup 在这里变一行。 */
+  .brand-logo{width:28px;height:28px}
+  .brand-mark{font-size:18px;letter-spacing:1px}
+  .brand-sub{display:none}
+  .nav{flex-direction:row;flex:0 0 auto}
+  .nav-item{white-space:nowrap;padding:8px 13px;font-size:var(--fs-3)}
+  .main{padding:18px 15px 44px}
+  h1{font-size:20px}
+  input[type=search]{min-width:100%}
+  /* 搜索框独占一行后，两个下拉平分下一行 —— 否则两个固定 190px 的下拉
+     一左一右会显得歪。宽屏仍用固定宽度。 */
+  .toolbar .combo{flex:1 1 0;width:auto}
+  .toolbar .combo-btn{max-width:none}
+}
+
+/* ============================================================
+   早盘总结页（/morning）专用
+   数据来自 data/morning.json（工作日 06:30 由定时任务写入），页面不抓行情，
+   所以这里只有「阅读型」版式。
+   排版原则：**卡片流优先，表格只留给真正需要横向对齐的窄数据。**
+   初版把异动榜和关注池做成 35 行 × 7 列的大表格，读起来像电子表格；
+   根本原因是驱动原因是一整句话，塞进单元格里必然又窄又难读。
+   ============================================================ */
+
+.panel h2.sec{display:flex;align-items:baseline;gap:10px;
+  border-bottom:1px solid var(--line);padding-bottom:10px;margin-bottom:16px}
+.sec-n{font-size:var(--fs-2);font-weight:400;color:var(--ink3)}
+/* 原有一条 .panel.foot（页脚：数据来源 / 生成方式）随页脚一起删掉了，2026-09-22 */
+.hint.sub{margin:0 0 14px}
+
+/* ---------- 迷你涨跌条：按组内最大幅度归一化，让幅度可比 ---------- */
+.bar{height:4px;border-radius:999px;background:#e6eaf0;overflow:hidden;margin-top:10px}
+.bar i{display:block;height:100%;border-radius:999px}
+.bar i.up{background:var(--red)}
+.bar i.down{background:var(--green)}
+
+/* ---------- 大盘 ---------- */
+.idxrow{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:14px}
+.idx{background:#f7f9fb;border:1px solid var(--line);border-radius:12px;padding:16px 18px}
+.idx-k{font-size:var(--fs-2);color:var(--ink3)}
+.idx-v{font-size:30px;font-weight:600;letter-spacing:-.8px;margin:4px 0 2px;
+  font-variant-numeric:tabular-nums}
+.idx-d{display:flex;align-items:baseline;gap:10px;font-size:var(--fs-3);font-weight:600;
+  font-variant-numeric:tabular-nums}
+.idx-d.up{color:var(--red)} .idx-d.down{color:var(--green)}
+.idx-abs{font-weight:400;color:var(--ink3);font-size:var(--fs-2)}
+.idx-n{font-size:var(--fs-1);color:var(--ink3);margin-top:6px}
+
+/* ---------- 两张表共用：驱动原因列 ---------- */
+/* 不在这里重定义 .tblwrap / table / td.code / td.num / td.sec / td.ind —— 那些是全站共用的，
+   两页表格必须长得一样，各写一份必然漂移。
+   这里只定义两页共有的那一列：
+     td.why  驱动原因，是一整句话，必须放开宽度，否则会挤成一条竖线 */
+td.why{color:var(--ink2);font-size:var(--fs-2);min-width:340px;line-height:1.65}
+/* 最小宽度：基础表 1160px + 驱动原因列。
+   两页列集合已完全相同（代码/公司全称/价格/涨跌幅/总市值/板块/行业/驱动原因），
+   所以最小宽度也取同一个值 —— 同一宽度下两页每列的宽窄与换行位置一致，
+   横向滚动出现的位置也一致。 */
+table.t-movers,table.t-evening{min-width:1560px}
+
+/* 标签（A 股标的用；表格里的状态药丸复用全站的 .band） */
+.chip{display:inline-block;font-size:var(--fs-1);color:var(--ink2);background:var(--card);
+  border:1px solid var(--line);border-radius:999px;padding:2px 10px}
+.chip-as{border-color:#d6e2f2;background:#f2f7fd;color:var(--blue);margin:2px 5px 2px 0}
+
+/* ---------- 关注池：自适应小方块 ---------- */
+.tiles{display:grid;grid-template-columns:repeat(auto-fill,minmax(170px,1fr));gap:10px}
+.tile{background:#f7f9fb;border:1px solid var(--line);border-radius:10px;padding:12px 13px}
+/* 顶部一行右侧**常驻**留出 26px 给移除按钮：按钮是绝对定位的，不留白就会压住涨跌幅。
+   也想过"只在 hover 时让位"，但那会让涨跌幅在鼠标划过时左右跳一下，比一直留白更烦。 */
+.tile-t{display:flex;justify-content:space-between;align-items:baseline;gap:8px;padding-right:26px}
+.tile-code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-weight:600;font-size:var(--fs-3)}
+.tile-chg{font-size:var(--fs-3);font-weight:600;font-variant-numeric:tabular-nums}
+.tile-chg.up{color:var(--red)} .tile-chg.down{color:var(--green)}
+.tile-n{font-size:var(--fs-2);color:var(--ink2);margin-top:5px;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.tile-p{font-size:var(--fs-1);color:var(--ink3);margin-top:3px;font-variant-numeric:tabular-nums}
+.tile-k{font-size:var(--fs-1);color:var(--ink3);margin-top:6px;line-height:1.5}
+.tile .bar{margin-top:8px}
+
+/* ---------- 关注池：自定义增删（2026-09-22 按用户要求） ----------
+   工具条在网格**上面**、方块在外面。理由：把"添加"塞进网格末尾会做成一个
+   又窄又怪的方块（格子只有 170px），而且输入框跟着网格一起重绘会丢焦点。 */
+.wl-tools{display:flex;flex-wrap:wrap;gap:9px;align-items:center;margin:0 0 12px}
+.wl-add{font:inherit;font-size:var(--fs-3);padding:7px 13px;border:1px solid var(--line);
+  border-radius:8px;background:var(--card);color:var(--ink);width:230px}
+.wl-add:focus{outline:none;border-color:#bcd3f0;background:#fbfdff}
+.wl-add-btn{padding:7px 16px}
+
+/* ---------- 输入建议下拉（组件见 suggest.js）----------
+   .sug 是定位容器：弹层要贴在输入框正下方，所以它必须 position:relative，
+   且宽度跟着输入框走（inline-block 而不是 block，否则会把工具条撑开一行）。 */
+.sug{position:relative;display:inline-block;flex:0 0 auto}
+.sug-pop{position:absolute;top:calc(100% + 5px);left:0;z-index:40;
+  min-width:100%;width:max-content;max-width:420px;max-height:264px;overflow-y:auto;
+  background:var(--card);border:1px solid var(--line);border-radius:8px;
+  box-shadow:0 8px 22px rgba(22,25,29,.14);padding:5px}
+.sug-i{display:flex;align-items:baseline;gap:8px;padding:6px 9px;border-radius:6px;
+  font-size:var(--fs-3);cursor:pointer}
+.sug-i:hover,.sug-i.hi{background:#f2f6fb}
+/* 代码用等宽 + 定宽：长短不一的代码要对齐，否则右侧公司名会参差不齐 */
+.sug-code{flex:0 0 auto;min-width:56px;
+  font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-weight:600;color:var(--ink)}
+.sug-i.hi .sug-code{color:var(--blue)}
+.sug-tag{flex:0 0 auto;font-size:var(--fs-1);color:var(--ink3);
+  background:#eef1f5;border-radius:4px;padding:1px 5px}
+.sug-name{flex:1 1 auto;min-width:0;color:var(--ink2);
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.sug-none{padding:7px 10px;font-size:var(--fs-2);color:var(--ink3)}
+/* 「已移除 N 只 · 恢复」推到最右；没有已移除项时是空的，不会占位 */
+.wl-hidden{margin-left:auto}
+.wl-hidden a{color:var(--blue);text-decoration:none}
+.wl-hidden a:hover{text-decoration:underline}
+
+/* 方块右上角的移除按钮：平时淡出，悬停整格才显形 —— 24 个 × 常驻会盖住涨跌幅那一行。
+   触屏没有 hover，用 @media (hover:none) 让它常驻，否则手机上根本点不到。 */
+.tile{position:relative}
+.tile-del{position:absolute;top:5px;right:5px;width:20px;height:20px;padding:0;
+  display:flex;align-items:center;justify-content:center;
+  font-size:14px;line-height:1;border-radius:50%;
+  background:var(--card);border:1px solid var(--line);color:var(--ink3);
+  opacity:0;transition:opacity .12s}
+.tile:hover .tile-del,.tile-del:focus{opacity:1}
+.tile-del:hover{border-color:#e6b8b8;color:var(--red)}
+@media (hover:none){.tile-del{opacity:1}}
+
+/* 自选票：左上角加一道竖线 + 代码后的「自选」小标，与默认池的票一眼可分。
+   不能只靠颜色区分 —— 涨跌幅本身已经在用红绿了。 */
+.tile.is-custom{border-left:3px solid var(--blue);padding-left:11px}
+.tile-tag{font-style:normal;font-weight:400;font-size:var(--fs-1);color:var(--blue);
+  background:#eaf1fb;border-radius:4px;padding:1px 5px;margin-right:6px;
+  white-space:nowrap;
+  font-family:-apple-system,BlinkMacSystemFont,"PingFang SC",sans-serif}
+/* 取数中 / 取数失败：**保留方块本体**，别让它在加载时忽隐忽现导致网格跳动 */
+.tile.is-pending,.tile.is-err{border-style:dashed;background:#fbfcfd}
+/* 只有"可重试"的那种才给手型光标 —— "查不到这个代码"点了也没用，别诱导点击 */
+.tile.is-err.is-retry{cursor:pointer}
+.tile.is-err .tile-n{color:var(--amber);white-space:normal}
+.tile.is-pending .tile-n{color:var(--ink3)}
+
+/* ---------- 主线归纳 / 关联性分析 ---------- */
+.theme{background:#f7f9fb;border:1px solid var(--line);border-left:3px solid var(--line);
+  border-radius:12px;padding:14px 18px;margin-bottom:12px}
+.theme:last-child{margin-bottom:0}
+/* 质量/置信度用「蓝-琥珀-灰」，**不要用红绿** ——
+   本站红=涨、绿=跌，把红色用在"高质量信号"上会被误读成方向。 */
+.theme.q-high{background:#fafcff;border-left-color:var(--blue)}
+.theme.q-mid{background:#fffdf7;border-left-color:var(--amber)}
+.card-h{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:9px;
+  font-size:var(--fs-4)}
+.card-s{font-size:var(--fs-3);color:var(--ink2);line-height:1.75;margin-top:4px}
+.card-s .lbl{display:inline-block;min-width:42px;color:var(--ink3);font-size:var(--fs-2)}
+.q{font-size:var(--fs-1);font-weight:400;padding:2px 10px;border-radius:999px;
+  border:1px solid var(--line);background:var(--card);color:var(--ink3)}
+.q-high{background:#eaf1fb;border-color:#c8dcf5;color:var(--blue)}
+.q-mid{background:#fdf5e6;border-color:#efdcb8;color:#8a6414}
+.q-low{background:#eef1f5;border-color:#dde2e9;color:var(--ink3)}
+.kv{margin:0;display:grid;grid-template-columns:88px 1fr;gap:9px 14px;font-size:var(--fs-3)}
+.kv dt{color:var(--ink3);font-size:var(--fs-2);padding-top:2px}
+.kv dd{margin:0;color:var(--ink2);line-height:1.75}
+
+/* ---------- A 股联动提示 ---------- */
+.hints{margin:0;padding:0;list-style:none;counter-reset:h;
+  font-size:var(--fs-4);color:var(--ink2);line-height:1.8}
+.hints li{counter-increment:h;position:relative;padding-left:32px;margin-bottom:10px}
+.hints li:last-child{margin-bottom:0}
+.hints li::before{content:counter(h);position:absolute;left:0;top:4px;
+  width:21px;height:21px;border-radius:50%;background:#eaf1fb;color:var(--blue);
+  font-size:var(--fs-1);font-weight:600;line-height:21px;text-align:center}
+
+@media(max-width:900px){
+  .kv{grid-template-columns:1fr;gap:3px}
+  .kv dt{margin-top:8px}
+}
+@media(max-width:640px){
+  .idxrow{grid-template-columns:1fr}
+  .idx-v{font-size:26px}
+  .tiles{grid-template-columns:repeat(auto-fill,minmax(142px,1fr))}
+}
+
+/* ============================================================
+   宽屏：把主区横向用起来
+   主区已不限宽（见 .main）。**每个区块独占整行，靠区块内部横向铺开**，
+   而不是把区块两两并排。
+   曾试过「主区切两列、区块两两并排」，实测失败并已回退：同一行的两块
+   高度差可达 557px（关联性分析 953px vs A 股联动提示 396px），
+   短的那块下方空出一大片，比单列更难看 —— 而「右侧空一片」正是本次要修的问题。
+   实测数据见 .workbuddy/memory/2026-09-22.md。
+
+   哪些内部要铺开，取决于内容形态：
+     · 并列的卡片组（大盘 3 张指数卡、主线 3 张主题卡、关联 3 个因子、
+       A 股 3 条提示）→ 改成 3 列；
+     · 宽表格（异动榜）与方块网格（关注池）→ 本来就是自适应，无需处理。
+   断点取 1660px：3 列时每列约 455px，卡内正文仍有约 23 字/行，是能读的下限。
+   ============================================================ */
+@media(min-width:1660px){
+  /* 大盘：写死 3 列。靠 auto-fit 的 min 200px 去凑，宽度一充裕它会算成
+     10 条轨道再把空的折叠掉，结果虽对但不好预测，直接写明更可靠。 */
+  .idxrow{grid-template-columns:repeat(3,minmax(0,1fr))}
+  /* 这里每张卡有 660px 宽，竖排（标签／数字／涨跌各占一行）会挤在左上角、
+     右侧空一大片。改成一行横幅：标签 · 数字 · 涨跌 排在一行，涨跌条落到下一行
+     占满宽度。窄屏仍然用原来的竖排。 */
+  .idx{display:flex;flex-wrap:wrap;align-items:baseline;column-gap:20px;row-gap:8px}
+  .idx-v{margin:0}
+  .idx .bar{flex:1 0 100%;margin-top:4px}
+  .idx-n{flex:1 0 100%}
+
+  /* 主线归纳 / 关联性分析：3 张卡并排。
+     高度不等时让它们对齐（默认 stretch）—— 卡片有底色，补齐后更像一排卡，
+     而顶对齐会在矮卡下方露出页面底色，看着像没画满。 */
+  .cardgrid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}
+  /* 间距交给 grid 的 gap，否则叠加 .theme 的 margin-bottom 会变成双倍 */
+  .cardgrid > .theme{margin-bottom:0}
+
+  /* A 股联动提示：3 条并排。不并排的话每条只有 60 来字，
+     整行 2030px 里会右侧空掉一大截。 */
+  .hints{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));
+    gap:14px 24px;align-items:start}
+  .hints li{margin-bottom:0}
+
+  /* 关注池方块在更宽的版面里多排一列，避免留出半行空白 */
+  .tiles{grid-template-columns:repeat(auto-fill,minmax(160px,1fr))}
+}
+

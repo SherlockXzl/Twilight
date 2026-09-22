@@ -1,0 +1,34 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>早盘总结</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="app">
+
+  <aside class="sidebar" id="sidebar"></aside>
+
+  <main class="main">
+    <header class="top" id="pageHeader"></header>
+
+    <div class="panel" id="notice" style="display:none"></div>
+
+    <!-- tabs--page：子页面切换器（总览 / 个股 / 关注 是三块不同的内容，不是筛选条件）。
+         与夜盘异动页的 tabs--filter（分档筛选）是两种控件，样式在 style.css 里分开定义。 -->
+    <div class="tabs tabs--page" id="tabs"></div>
+
+    <div id="morningHost"></div>
+  </main>
+
+</div>
+<script src="util.js"></script>
+<script src="icons.js"></script>
+<script src="combo.js"></script>
+<script src="suggest.js"></script>
+<script src="shell.js"></script>
+<script src="morning.js"></script>
+</body>
+</html>

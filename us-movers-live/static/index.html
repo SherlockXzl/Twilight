@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>夜盘异动</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="app">
+
+  <aside class="sidebar" id="sidebar"></aside>
+
+  <main class="main">
+    <header class="top" id="pageHeader"></header>
+
+    <div class="panel" id="notice" style="display:none"></div>
+
+    <!-- tabs--filter：分档筛选器。与早盘页的 tabs--page（子页面切换）是两种控件，
+         样式在 style.css 里分别定义，不要合并。详见 style.css 顶部「标签页的两种身份」注释。 -->
+    <div class="tabs tabs--filter" id="tabs"></div>
+    <div class="hint criteria" id="criteriaLine">加载中…</div>
+
+    <div class="toolbar">
+      <input type="search" id="q" placeholder="搜索代码 / 公司 / 板块 / 行业…">
+      <div id="sectorSel" class="combo"></div>
+      <div id="industrySel" class="combo"></div>
+      <span class="hint" id="rowInfo"></span>
+    </div>
+
+    <div id="tableHost"></div>
+
+    <div class="panel" id="exclPanel" style="display:none">
+      <details class="excl">
+        <summary id="exclSummary">被“市值 ≤ 15 亿美元”门槛剔除的异动（仅供对照）</summary>
+        <div id="exclHost"></div>
+      </details>
+    </div>
+  </main>
+
+</div>
+<script src="util.js"></script>
+<script src="icons.js"></script>
+<script src="combo.js"></script>
+<script src="shell.js"></script>
+<script src="evening.js"></script>
+</body>
+</html>
