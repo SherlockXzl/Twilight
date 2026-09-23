@@ -85,30 +85,24 @@ echo
 # ── 端到端验证 ──
 # 必须解析出**真实 IP** 再 curl：本机 DNS 被代理接管成 fake-ip（198.18.x.x），
 # 直接用域名 curl 永远不通，会误判成"隧道坏了"。
-# 两个解析源交叉验证：只信 1.1.1.1 会因它偶发抽风而误报（踩过）。
-IP=""
-for NS in 1.1.1.1 8.8.8.8; do
-  IP=$(curl -s --noproxy '*' --max-time 10 -H 'accept: application/dns-json' \
-        "https://$NS/dns-query?name=${DOMAIN#https://}&type=A" 2>/dev/null \
-      | "$PY" -c "
-import sys, json
-try:
-    d = json.load(sys.stdin)
-    print(next(a['data'] for a in d.get('Answer', []) if a.get('type') == 1))
-except Exception:
-    print('')" 2>/dev/null)
-  [ -n "$IP" ] && break
-done
+# 解析逻辑（多源 + 国内源优先）在 tools/lib-doh.sh 里，和 tunnel-setup.sh 共用。
+DOMAIN_HOST="${DOMAIN#https://}"
+DOH_PY="$PY"          # 复用同一个解释器，别让 lib 自己再猜一遍路径
+# shellcheck source=tools/lib-doh.sh
+. "$ROOT/tools/lib-doh.sh"
 
+IP=$(doh_resolve_ip "$DOMAIN_HOST") || IP=""
 if [ -z "$IP" ]; then
-  info "两个解析源都拿不到 IP，跳过端到端验证"
+  info "所有解析源都拿不到 IP，跳过端到端验证"
+  echo "    （DNS 可能还在生效中 —— 新加的记录一般 1~5 分钟；本机路由器还可能缓存着旧结果）"
   exit 0
 fi
 
-CODE=$(curl -s --noproxy '*' --resolve "${DOMAIN#https://}:443:$IP" \
+CODE=$(curl -s --noproxy '*' --resolve "$DOMAIN_HOST:443:$IP" \
          -o /dev/null --max-time 25 -w '%{http_code}' "$DOMAIN/evening" 2>/dev/null)
 if [ "$CODE" = "200" ]; then
   ok "端到端验证通过（$DOMAIN/evening → 200，解析 IP ${IP}）"
 else
   bad "端到端返回 $CODE —— 隧道活着但回源失败，看 $LOG 里的 'Unable to reach the origin service'"
 fi
+

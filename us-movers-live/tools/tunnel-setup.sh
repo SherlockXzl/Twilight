@@ -274,29 +274,19 @@ fi
 
 step "⑧ 端到端验证"
 # 必须解析出**真实 IP** 再 curl：本机 DNS 被代理接管成 fake-ip（198.18.x.x），
-# 直接 curl 域名永远不通，会误判成"隧道坏了"。两个解析源交叉验证，避免
-# 单点抽风（1.1.1.1 偶发不稳，只查一家会误报）。
-RESOLVE_IP=""
-for NS in 1.1.1.1 8.8.8.8; do
-  IP=$(curl -s --noproxy '*' --max-time 10 -H 'accept: application/dns-json' \
-        "https://$NS/dns-query?name=$HOST&type=A" 2>/dev/null \
-      | "$PY" -c "
-import sys, json
-try:
-    d = json.load(sys.stdin)
-    print(next(a['data'] for a in d.get('Answer', []) if a.get('type') == 1))
-except Exception:
-    print('')" 2>/dev/null)
-  if [ -n "$IP" ]; then
-    RESOLVE_IP="$IP"
-    ok "解析源 $NS → $IP"
-    break
-  fi
-  warn "解析源 $NS 没给出结果，换一个再试"
-done
+# 直接 curl 域名永远不通，会误判成"隧道坏了"。
+# 解析逻辑在 tools/lib-doh.sh（多源 + 国内源优先），和 share-url.sh 共用。
+DOH_PY="$PY"
+# shellcheck source=tools/lib-doh.sh
+. "$ROOT/tools/lib-doh.sh"
+
+# 带重试：CNAME 是刚刚才写进去的（第 ④ 步），可能还没传播出来。
+# 实测新建记录约 1~5 分钟可见，所以给 3 轮 × 20 秒。
+RESOLVE_IP=$(doh_resolve_ip_retry "$HOST" 3 20) || RESOLVE_IP=""
 
 if [ -z "$RESOLVE_IP" ]; then
-  warn "两个解析源都拿不到 IP，跳过端到端验证（DNS 可能还在生效中，等几分钟再跑 tools/share-url.sh）"
+  warn "所有解析源都拿不到 IP，跳过端到端验证"
+  echo "    DNS 一般 1~5 分钟生效，等一会儿再跑：bash tools/share-url.sh"
 else
   # /evening 可能需要 60~90 秒才有完整数据，但 HTTP 码应该立刻是 200
   CODE=$(curl -s --noproxy '*' --resolve "$HOST:443:$RESOLVE_IP" \

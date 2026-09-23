@@ -216,22 +216,35 @@ docker run -p 8787:8787 us-movers-live
 
 #### 固定链接怎么配
 
+**当前线上地址：<https://twilight-market.trade>**（隧道名 `chenhunxian-movers`）
+
 **硬约束：Cloudflare 的固定链接必须绑定一个托管在 Cloudflare 的域名。** 没有域名只能用 quick tunnel，而它天生随机 —— 这是产品限制，绕不过去。
 
-两步：
+三步：
 
 ```bash
 # ① 一次性：浏览器里选中你要用的域名（这一步必须交互，脚本代劳不了）
 cloudflared tunnel login
 
 # ② 配置固定链接（幂等，可重复跑）
-bash tools/tunnel-setup.sh movers.你的域名.com
+bash tools/tunnel-setup.sh twilight-market.trade
+
+# ③ 把两个进程交接给 launchd（开机自启 + 崩溃自启）
+bash tools/golive.sh
 ```
 
-脚本会依次做：检查本地服务 → 检查登录态 → 建/复用命名隧道 → `route dns` 写入 CNAME →
+第 ② 步会依次做：检查本地服务 → 检查登录态 → 建/复用命名隧道 → `route dns` 写入 CNAME →
 生成 `~/.cloudflared/config.yml` → 把 launchd plist 从 quick tunnel 换成命名隧道 → 等待握手 → 端到端验证。
 
+第 ③ 步必须在**你自己的终端**里跑 —— AI 助手的沙箱执行 `launchctl bootstrap` 会被系统拒绝
+（`Bootstrap failed: 5: Input/output error`）。它会先 `bootout` 卸掉托管实例，再收掉仍占着 8787 / 20241
+端口的野进程（开发期间从会话里起的那些），然后重新 `bootstrap`。
+
 之后 `bash tools/share-url.sh` 会自动认出固定链接模式并打印地址。
+
+**为什么非要有第 ③ 步**：从会话/临时终端里起的进程，会话一结束就被系统连带回收
+（`nohup`、`disown`、`setsid` 都挡不住），症状是"某天打开链接发现打不开了"、
+日志停在某一刻且**没有任何报错**。只有 launchd 的 `RunAtLoad` + `KeepAlive` 才真正长期活着。
 
 **域名从哪来**：Cloudflare Registrar 按成本价卖（`.com` 约 $9.15/年，**注册价 = 续费价**，含免费 WHOIS 隐私），
 注册时自动接管 DNS，不用手动改 NS。入口 <https://domains.cloudflare.com/>。
@@ -247,9 +260,14 @@ launchctl list | grep chenhunxian
 两个容易踩的点：
 
 1. **本机 DNS 被代理接管成 fake-ip（`198.18.x.x`）**，直接 `curl 域名` 永远不通，
-   会被误判成"隧道坏了"。必须先经 DoH 拿真实 IP 再 `curl --resolve` —— `share-url.sh` 已经这么做了，
-   并且**用两个解析源交叉验证**（只信 `1.1.1.1` 会因它偶发抽风而误报）。
+   会被误判成"隧道坏了"。必须先经 DoH 拿真实 IP 再 `curl --resolve`。
+   这段逻辑抽在 `tools/lib-doh.sh`（`share-url.sh` 与 `tunnel-setup.sh` 共用），
+   **多源依次试、国内源优先** —— 实测这台机器上 `1.1.1.1` / `8.8.8.8` / `dns.google`
+   全都不通（`dns.google` 连 `example.com` 都返回空响应），`dns.alidns.com` / `doh.pub` 才是稳的。
 2. **地址分配出来 ≠ 隧道握手完成**，这中间去访问会得到 502。
+3. **刚写入的 DNS 记录不会立刻解析出来**（实测约 1~5 分钟），而且本机路由器还会缓存
+   着注册域名之前的 NXDOMAIN。所以 `tunnel-setup.sh` 的端到端验证带 3 轮重试，
+   别急着判定配置失败。
 
 ---
 
