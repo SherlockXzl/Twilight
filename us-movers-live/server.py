@@ -92,6 +92,12 @@ PAGE_ROUTES = {
     "/morning": "/morning.html",    # 早盘总结
 }
 
+#: 站点图标。页面里已用 <link rel="icon"> 指到 logo.png，但浏览器在书签、
+#: 历史记录、以及各种抓取/预览工具下**仍会直接拍一个 /favicon.ico 过来**，
+#: 绕过页面里那条 <link>。统一在这里接住并指向同一张 logo.png ——
+#: 省得再维护一份 .ico，日志里也不会刷 404。
+FAVICON_ROUTE = "/logo.png"
+
 
 # ---------------------------------------------------------------- 早盘总结
 
@@ -622,9 +628,20 @@ class Handler(SimpleHTTPRequestHandler):
         pass
 
     def end_headers(self):
-        """静态资源禁用浏览器缓存 —— 否则改了 app.js/style.css 后页面不生效。"""
-        if self.path.split("?")[0].endswith((".html", ".js", ".css")):
+        """静态资源禁用浏览器缓存 —— 否则改了 app.js/style.css 后页面不生效。
+
+        `.png` 走的是另一条策略（2026-09-23 加）：站点标和图标是**会被整体替换**的
+        品牌资产 —— logo.png / brand.png 换的是内容、不是文件名，浏览器认名不认内容，
+        不处理就会一直显示旧图（favicon 尤其顽固，可能缓存到第二天）。
+        这里用 no-cache + must-revalidate 而不是 no-store：浏览器仍可以存，
+        但每次都会带 If-Modified-Since 回来问一句，没变就回 304 ——
+        既不会重复下载大图，换了图又能立刻生效。
+        """
+        path = self.path.split("?")[0]
+        if path.endswith((".html", ".js", ".css")):
             self.send_header("Cache-Control", "no-store, must-revalidate")
+        elif path.endswith(".png"):
+            self.send_header("Cache-Control", "no-cache, must-revalidate")
         super().end_headers()
 
     def _json(self, obj, code=200):
@@ -669,6 +686,8 @@ class Handler(SimpleHTTPRequestHandler):
         # 页面路由（左侧菜单用短链接；直接访问 .html 也照常可用）
         if path in PAGE_ROUTES:
             self.path = PAGE_ROUTES[path]
+        elif path == "/favicon.ico":
+            self.path = FAVICON_ROUTE
         return super().do_GET()
 
     def _symbols(self):

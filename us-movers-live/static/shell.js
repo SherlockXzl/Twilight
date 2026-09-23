@@ -88,21 +88,18 @@
     }).join("");
     host.innerHTML =
       '<div class="brand">' +
-        /* 站点标：整个页面最左上角。用 <img> 而不是 CSS 背景图 —— 背景图在
-           打印 / 右键另存时不会跟着走，而这是全站唯一的品牌资产，值得是个真元素。
+        /* 站点标：整个页面最左上角。2026-09-23 换成用户给的**完整标识图**
+           （brand.png = 圆形徽标 + 「晨昏线」三字一体）—— 图里自带站名，
+           所以 HTML 里不再有 .brand-mark / .brand-sub 那两行文字。
+           原先「小图 + 纯文字站名 + 副标题」的 lockup、以及当年配色踩过的坑，
+           见 style.css「站点标」一节的历史注释，没有丢。
+
+           用 <img> 而不是 CSS 背景图 —— 背景图在打印 / 右键另存时不会跟着走，
+           而这是全站唯一的品牌资产，值得是个真元素。
            width/height 写在标签上（不只是 CSS）：图还没解码完时侧栏也不会先塌一下再跳。
-           —— 2026-09-22 按用户要求加。 */
-        '<img class="brand-logo" src="logo.png" alt="' + U.esc(SITE.name) + '" width="38" height="38">' +
-        '<div class="brand-tx">' +
-          /* 站点名：**一整段纯文字**（2026-09-22 按用户要求从"三字三种处理"改回常规）。
-             曾经拆成 .bd / .bn / .bo 三个 span 做过金-蓝分色 + 第三字白底黑描边，
-             现在退回单色 + 系统字体。
-             ⚠️ 别再按字位拆 span —— 拆了就又要靠"站点名正好 3 个字"这个隐含前提，
-             改个名字就会静默错位；纯文字没有这个约束。
-             需要重新上分色时的取值与踩过的坑见 README「站点标」一节。 */
-          '<div class="brand-mark">' + U.esc(SITE.name) + "</div>" +
-          '<div class="brand-sub">' + U.esc(SITE.tagline) + "</div>" +
-        "</div>" +
+           宽高比 = 裁剪后原图的 1382:667。 */
+        '<img class="brand-img" src="brand.png" alt="' + U.esc(SITE.name + " " + SITE.tagline) +
+          '" width="180" height="87">' +
       "</div>" +
       '<nav class="nav">' + items + "</nav>";
   }
