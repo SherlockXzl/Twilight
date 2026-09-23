@@ -27,19 +27,30 @@ run() {
 }
 
 # 1) 语法自检 —— 最快的失败点，先跑
-#    注意这里的文件名要和 static/ 下实际的脚本一致：漏一个就等于那个文件
-#    的语法错误不会被任何用例挡下（suggest.js 曾经就漏在这张清单外）。
-run "语法自检（JS + Python）" bash -c "
+run "语法自检（JS + Python + shell）" bash -c "
   for f in util icons combo suggest shell morning evening; do
     $NODE --check static/\$f.js || exit 1
   done
-  $PY -m py_compile server.py screening.py providers.py taxonomy_zh.py symbols.py morning_fetch.py || exit 1
+
+  # Python 清单**从文件系统推导**，不手写。
+  # 2026-09-23 之前这里是硬编码的 6 个文件名，alpaca/night_fetch/settings
+  # 都没被检查 —— 同一个毛病也出现在 Dockerfile 的 COPY 清单上（只在
+  # Render 上炸）。硬编码的清单迟早落后于代码，所以改成推导。
+  # 排除 build_*.py（一次性的数据快照生成脚本，不进运行时依赖）。
+  PYS=\$(ls *.py | grep -v '^build_' | tr '\n' ' ')
+  $PY -m py_compile \$PYS || exit 1
+  echo \"  Python 语法 OK（\$(echo \$PYS | wc -w | tr -d ' ') 个）：\$PYS\"
+
+  # shell 脚本：语法 + 多字节变量陷阱（macOS bash 3.2 会把中文并进变量名）
+  for f in tools/*.sh; do bash -n \"\$f\" || exit 1; done
+  $PY tools/lint_shell_vars.py || exit 1
+
   $PY - <<'EOF' || exit 1
 s = open('static/style.css', encoding='utf-8').read()
 assert s.count('{') == s.count('}'), 'CSS 花括号不配对'
 print('  CSS 花括号 %d/%d 配对' % (s.count('{'), s.count('}')))
 EOF
-  echo '  7 个 JS + 6 个 Python 文件语法 OK'
+  echo '  JS 语法 + shell 语法 + shell 多字节变量 OK'
 "
 
 # 2) 用例
@@ -56,6 +67,7 @@ run "外壳：轮询调度与页头"           "$NODE" tools/test_polling.js
 run "早盘总结页头（daily 模式）"     "$NODE" tools/test_daily_header.js
 run "早盘总结标签页记忆"             "$NODE" tools/test_morning_tabs.js
 run "后端：夜盘口径（窗口/基准/扫描/冻结）" "$PY" tools/test_night.py
+run "固定链接：命名隧道配置（config.yml + plist）" "$PY" tools/test_tunnel.py
 
 printf '\n'
 if [ "$fail" = "0" ]; then

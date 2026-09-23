@@ -1,0 +1,317 @@
+#!/bin/bash
+# 把「晨昏线」从**随机临时隧道**切到**固定链接**（Cloudflare 命名隧道 / Named Tunnel）。
+#
+#   bash tools/tunnel-setup.sh movers.example.com
+#
+# 为什么要换：现在的 quick tunnel（`cloudflared tunnel --url ...`）每次重启都会
+# 换一个新域名，链接写不进文档、也发不了固定的朋友圈地址。命名隧道把域名写死在
+# Cloudflare 的 DNS 里，重启、重装、换网络都不变。
+#
+# 前置条件（只需一次）：
+#   1. 你有一个域名，且**已经添加进 Cloudflare 账号**（NS 已指向 Cloudflare）。
+#      没有域名就没有固定链接 —— 这是 Cloudflare 的产品限制，quick tunnel 是
+#      唯一不需要域名的模式，而它天生是随机的。域名在 Cloudflare Registrar
+#      注册是按成本价（.com 约 $9.15/年），注册和续费同价。
+#   2. 已经跑过 `cloudflared tunnel login`（浏览器里选中你的域名）。
+#      没跑过的话，本脚本会提示你先跑 —— 这一步必须交互，脚本代劳不了。
+#
+# 幂等：重复跑只会重写 config.yml / plist 并重载 launchd，不会重复建隧道。
+#
+# 跑完的固定地址： https://<HOSTNAME>/evening  （夜盘）
+#                  https://<HOSTNAME>/morning   （早盘）
+
+set -u
+
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+PY=/Users/xuzhuoli/.workbuddy/binaries/python/versions/3.13.12/bin/python3
+
+# 下面几个都可以用环境变量覆盖 —— **不是为了灵活，是为了可测**。
+# tools/test_tunnel.py 会把 HOME 指向临时目录、把 CLOUDFLARED 指向一个桩程序，
+# 从而在没有真实 Cloudflare 凭证的情况下验证生成的 config.yml / plist 是否正确。
+CLOUDFLARED="${CLOUDFLARED:-$HOME/.local/bin/cloudflared}"
+CF_DIR="${CF_DIR:-$HOME/.cloudflared}"
+CONFIG="$CF_DIR/config.yml"
+TUNNEL_NAME="${TUNNEL_NAME:-chenhunxian-movers}"
+LOCAL_PORT="${LOCAL_PORT:-8787}"
+PLIST="${PLIST:-$HOME/Library/LaunchAgents/com.chenhunxian.us-movers-tunnel.plist}"
+LABEL="${LABEL:-com.chenhunxian.us-movers-tunnel}"
+# 只给用例用：跳过 launchd 注册与联网体检（那两步需要真实隧道）
+SKIP_SYSTEM="${SKIP_SYSTEM:-0}"
+
+ok()   { printf "  \033[32m✓\033[0m %s\n" "$1"; }
+bad()  { printf "  \033[31m✗\033[0m %s\n" "$1"; }
+warn() { printf "  \033[33m!\033[0m %s\n" "$1"; }
+step() { printf "\n\033[1m%s\033[0m\n" "$1"; }
+
+# ────────────────────────────── 参数 ──────────────────────────────
+HOSTNAME_ARG="${1:-}"
+if [ -z "$HOSTNAME_ARG" ]; then
+  cat <<EOF
+用法：bash tools/tunnel-setup.sh <完整域名>
+
+例：  bash tools/tunnel-setup.sh movers.example.com
+      （example.com 必须已在你的 Cloudflare 账号里）
+
+如果你还没有域名：先去 https://domains.cloudflare.com/ 搜一个并注册（按成本价，
+.com 约 \$9.15/年，注册价=续费价），注册时 Cloudflare 会自动接管 DNS，然后回来跑本脚本。
+EOF
+  exit 1
+fi
+# 去掉可能的 https:// 前缀和结尾斜杠，只留主机名
+HOST="${HOSTNAME_ARG#https://}"
+HOST="${HOST#http://}"
+HOST="${HOST%/}"
+
+case "$HOST" in
+  *.*) ;;
+  *) bad "「${HOST}」看起来不是完整域名（要形如 movers.example.com）"; exit 1 ;;
+esac
+
+if [ ! -x "$CLOUDFLARED" ]; then
+  bad "找不到 $CLOUDFLARED"
+  exit 1
+fi
+
+printf "\033[1m目标\033[0m  固定地址 https://%s  →  127.0.0.1:%s\n" "$HOST" "$LOCAL_PORT"
+
+# ─────────────────────── ① 本地服务在不在 ───────────────────────
+step "① 看板服务（127.0.0.1:${LOCAL_PORT}）"
+if curl -s --noproxy '*' --max-time 3 "http://127.0.0.1:$LOCAL_PORT/healthz" >/dev/null 2>&1; then
+  ok "在运行"
+else
+  bad "没有响应 —— 先跑 bash tools/start.sh 把服务起来，再回来跑本脚本"
+  exit 1
+fi
+
+# ───────────────────── ② Cloudflare 登录态 ─────────────────────
+step "② Cloudflare 登录态"
+if [ -f "$CF_DIR/cert.pem" ]; then
+  ok "cert.pem 已存在（已登录）"
+else
+  warn "还没有登录过，需要你手动跑一次（会打开浏览器选域名）："
+  echo
+  echo "      $CLOUDFLARED tunnel login"
+  echo
+  echo "    浏览器里选中你要用的那个域名 → Authorize。完成后重跑本脚本。"
+  echo
+  echo "    注意：如果下拉列表里是空的，说明该域名还没添加进 Cloudflare 账号，"
+  echo "          先去 https://dash.cloudflare.com/ → Add a site 把它加进来，"
+  echo "          并按提示把 NS 改到 Cloudflare（生效可能要几分钟到几小时）。"
+  exit 1
+fi
+
+# ─────────────────────── ③ 建/复用隧道 ───────────────────────
+step "③ 命名隧道"
+TUNNEL_ID=$("$CLOUDFLARED" tunnel list --output json 2>/dev/null \
+  | "$PY" -c "
+import sys, json
+try:
+    rows = json.load(sys.stdin) or []
+except Exception:
+    rows = []
+for r in rows:
+    if r.get('name') == '$TUNNEL_NAME':
+        print(r.get('id', ''))
+        break
+" 2>/dev/null)
+
+if [ -n "$TUNNEL_ID" ]; then
+  ok "已存在，复用：$TUNNEL_NAME ($TUNNEL_ID)"
+else
+  printf "  创建 %s ...\n" "$TUNNEL_NAME"
+  if ! "$CLOUDFLARED" tunnel create "$TUNNEL_NAME" >/dev/null 2>&1; then
+    bad "创建失败。单独跑一次看原因：$CLOUDFLARED tunnel create $TUNNEL_NAME"
+    exit 1
+  fi
+  TUNNEL_ID=$("$CLOUDFLARED" tunnel list --output json 2>/dev/null \
+    | "$PY" -c "
+import sys, json
+for r in (json.load(sys.stdin) or []):
+    if r.get('name') == '$TUNNEL_NAME':
+        print(r.get('id', '')); break
+" 2>/dev/null)
+  [ -n "$TUNNEL_ID" ] || { bad "创建后拿不到 tunnel id"; exit 1; }
+  ok "已创建：$TUNNEL_ID"
+fi
+
+CRED="$CF_DIR/$TUNNEL_ID.json"
+[ -f "$CRED" ] || { bad "缺少凭证文件 $CRED"; exit 1; }
+chmod 600 "$CRED"
+ok "凭证文件就位（权限 600）"
+
+# ───────────────────── ④ 把域名指到隧道 ─────────────────────
+step "④ DNS 路由  $HOST  →  $TUNNEL_ID.cfargotunnel.com"
+ROUTE_OUT=$("$CLOUDFLARED" tunnel route dns "$TUNNEL_NAME" "$HOST" 2>&1)
+if [ $? -eq 0 ]; then
+  ok "$ROUTE_OUT"
+else
+  # 已存在时会报 "record with that host already exists"，这属于幂等成功
+  if printf '%s' "$ROUTE_OUT" | grep -qi 'already exists'; then
+    ok "DNS 记录已存在，跳过"
+  else
+    bad "$ROUTE_OUT"
+    echo "    常见原因：域名 $HOST 不属于你登录时选的那个 zone。"
+    exit 1
+  fi
+fi
+
+# ───────────────────────── ⑤ 写 config.yml ─────────────────────────
+step "⑤ 隧道配置  $CONFIG"
+mkdir -p "$CF_DIR"
+# 备份已有配置（如果之前手写过别的）
+if [ -f "$CONFIG" ] && ! grep -q "Generated by tools/tunnel-setup.sh" "$CONFIG" 2>/dev/null; then
+  cp "$CONFIG" "$CONFIG.bak.$(date +%s)"
+  warn "旧配置已备份为 $CONFIG.bak.$(date +%s)"
+fi
+cat > "$CONFIG" <<EOF
+# Generated by tools/tunnel-setup.sh —— 重跑该脚本会覆盖本文件，别手改。
+#
+# 固定链接：https://$HOST
+# 改动口径（换域名、换端口）请改脚本里的变量后重跑，不要直接编辑这里。
+
+tunnel: $TUNNEL_ID
+credentials-file: $CRED
+
+# 固定监控端口。tools/share-url.sh 靠它判断"隧道是否真的连上了 Cloudflare"——
+# 地址分配出来 ≠ 握手完成，这中间去访问会得到 502，容易被误当成配置错误（踩过）。
+metrics: 127.0.0.1:20241
+
+ingress:
+  - hostname: $HOST
+    service: http://127.0.0.1:$LOCAL_PORT
+  # 兜底规则，**必须是最后一条**，否则 cloudflared 拒绝启动：
+  # 任何没匹配上的 Host 一律 404，不泄露本机其他服务。
+  - service: http_status:404
+EOF
+chmod 600 "$CONFIG"
+ok "已写入"
+
+# ───────────────── ⑥ 用命名隧道替换 quick tunnel plist ─────────────────
+step "⑥ launchd 服务（开机/崩溃自启）"
+cat > "$PLIST" <<EOF
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- 固定链接隧道（Cloudflare 命名隧道）。由 tools/tunnel-setup.sh 生成。
+
+     与旧的 quick tunnel 版本的区别：这里跑的是 \`tunnel run $TUNNEL_NAME\`，
+     Host 和回源端口都写在 $CONFIG 里，所以**重启不换域名**。
+
+     为什么不 nohup：会被工具会话连带回收（服务日志停在某一刻、看不出异常）。
+     launchd 的 KeepAlive + RunAtLoad 才能保证网络抖动/崩溃后自己回来。 -->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>$LABEL</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>$CLOUDFLARED</string>
+    <string>tunnel</string>
+    <string>--config</string>
+    <string>$CONFIG</string>
+    <string>--no-autoupdate</string>
+    <string>run</string>
+    <string>$TUNNEL_NAME</string>
+  </array>
+
+  <key>StandardOutPath</key>
+  <string>/tmp/cfd-tunnel.log</string>
+  <key>StandardErrorPath</key>
+  <string>/tmp/cfd-tunnel.log</string>
+
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <true/>
+
+  <key>ThrottleInterval</key>
+  <integer>15</integer>
+</dict>
+</plist>
+EOF
+ok "已写入 $PLIST"
+
+# 重载：先卸旧的（不管是 quick 还是命名），再挂新的。
+# bootout 对"本来就没挂"的 label 会返回非 0，属正常。
+if [ "$SKIP_SYSTEM" = "1" ]; then
+  warn "SKIP_SYSTEM=1，跳过 launchd 注册（用例模式）"
+else
+  launchctl bootout "gui/$(id -u)/$LABEL" >/dev/null 2>&1
+  if launchctl bootstrap "gui/$(id -u)" "$PLIST" >/dev/null 2>&1; then
+    ok "已注册并启动"
+  else
+    warn "自动注册失败（终端权限/会话问题常见）—— 手动跑一次："
+    echo "      launchctl bootstrap gui/\$(id -u) $PLIST"
+  fi
+fi
+
+if [ "$SKIP_SYSTEM" = "1" ]; then
+  step "完成（用例模式，未做联网体检）"
+  echo "  config.yml 与 plist 已按 ${HOST} 生成"
+  exit 0
+fi
+
+# ────────────────────── ⑦ 等待握手 + 体检 ──────────────────────
+step "⑦ 等待隧道连上 Cloudflare"
+printf "  "
+CONNECTED=0
+for _ in $(seq 1 45); do
+  sleep 1
+  printf "."
+  if curl -s --noproxy '*' --max-time 2 http://127.0.0.1:20241/metrics 2>/dev/null \
+       | grep -q 'cloudflared_tunnel_ha_connections [1-9]'; then
+    CONNECTED=1
+    break
+  fi
+done
+printf "\n"
+if [ "$CONNECTED" = "1" ]; then
+  ok "隧道已连接"
+else
+  bad "45 秒没连上，看 /tmp/cfd-tunnel.log"
+  exit 1
+fi
+
+step "⑧ 端到端验证"
+# 必须解析出**真实 IP** 再 curl：本机 DNS 被代理接管成 fake-ip（198.18.x.x），
+# 直接 curl 域名永远不通，会误判成"隧道坏了"。两个解析源交叉验证，避免
+# 单点抽风（1.1.1.1 偶发不稳，只查一家会误报）。
+RESOLVE_IP=""
+for NS in 1.1.1.1 8.8.8.8; do
+  IP=$(curl -s --noproxy '*' --max-time 10 -H 'accept: application/dns-json' \
+        "https://$NS/dns-query?name=$HOST&type=A" 2>/dev/null \
+      | "$PY" -c "
+import sys, json
+try:
+    d = json.load(sys.stdin)
+    print(next(a['data'] for a in d.get('Answer', []) if a.get('type') == 1))
+except Exception:
+    print('')" 2>/dev/null)
+  if [ -n "$IP" ]; then
+    RESOLVE_IP="$IP"
+    ok "解析源 $NS → $IP"
+    break
+  fi
+  warn "解析源 $NS 没给出结果，换一个再试"
+done
+
+if [ -z "$RESOLVE_IP" ]; then
+  warn "两个解析源都拿不到 IP，跳过端到端验证（DNS 可能还在生效中，等几分钟再跑 tools/share-url.sh）"
+else
+  # /evening 可能需要 60~90 秒才有完整数据，但 HTTP 码应该立刻是 200
+  CODE=$(curl -s --noproxy '*' --resolve "$HOST:443:$RESOLVE_IP" \
+           -o /dev/null --max-time 25 -w '%{http_code}' "https://$HOST/evening" 2>/dev/null)
+  if [ "$CODE" = "200" ]; then
+    ok "端到端通过（https://$HOST/evening → 200）"
+  else
+    bad "端到端返回 $CODE"
+    echo "    504/502 一般是回源没通：确认服务在 127.0.0.1:$LOCAL_PORT 上，"
+    echo "    并看 /tmp/cfd-tunnel.log 里的 'Unable to reach the origin service'。"
+  fi
+fi
+
+step "完成"
+echo "  夜盘异动  https://$HOST/evening"
+echo "  早盘总结  https://$HOST/morning"
+echo
+echo "  这个地址**不会再变**。以后要查状态/地址：bash tools/share-url.sh"

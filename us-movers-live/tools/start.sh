@@ -11,6 +11,11 @@
 #   launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.chenhunxian.us-movers-live.plist
 #   launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.chenhunxian.us-movers-tunnel.plist
 # （plist 已经写好放在 ~/Library/LaunchAgents/，本脚本会自动尝试一次）
+#
+# 想要**固定不变的链接**（重启也不换域名）：本脚本起的 quick tunnel 做不到，
+# 那种模式天生随机。走 Cloudflare 命名隧道：
+#   bash tools/tunnel-setup.sh movers.你的域名.com
+# 配过之后本脚本会自动认出固定链接模式，不再另起 quick tunnel。
 
 set -u
 
@@ -42,8 +47,38 @@ else
 fi
 
 step "② 公网隧道"
+
+# 命名隧道（固定链接）配过之后，就**不要再起 quick tunnel** 了：
+# 两个隧道会同时挂着，quick 那个还会白白占一个随机域名，排障时容易看错是哪个在起作用。
+NAMED_HOST=""
+if [ -f "$HOME/.cloudflared/config.yml" ]; then
+  NAMED_HOST=$(grep -E '^[[:space:]]*-[[:space:]]*hostname:' "$HOME/.cloudflared/config.yml" 2>/dev/null \
+    | head -1 | sed -E 's/^[[:space:]]*-[[:space:]]*hostname:[[:space:]]*//' | tr -d '"'"'"' ')
+fi
+if [ -n "$NAMED_HOST" ]; then
+  ok "已配置固定链接：https://$NAMED_HOST"
+  if curl -s --noproxy '*' --max-time 3 http://127.0.0.1:20241/metrics 2>/dev/null \
+       | grep -q 'cloudflared_tunnel_ha_connections [1-9]'; then
+    ok "隧道在运行，跳过"
+  else
+    P="$HOME/Library/LaunchAgents/com.chenhunxian.us-movers-tunnel.plist"
+    if launchctl bootstrap "gui/$(id -u)" "$P" >/dev/null 2>&1; then
+      ok "已拉起隧道"
+    else
+      warn_like="手动跑一次：launchctl bootstrap gui/\$(id -u) $P"
+      printf "  \033[33m!\033[0m %s\n" "$warn_like"
+    fi
+    for _ in $(seq 1 45); do
+      sleep 1
+      curl -s --noproxy '*' --max-time 2 http://127.0.0.1:20241/metrics 2>/dev/null \
+        | grep -q 'cloudflared_tunnel_ha_connections [1-9]' && break
+    done
+  fi
+  exec bash "$ROOT/tools/share-url.sh"
+fi
+
 if curl -s --max-time 3 http://127.0.0.1:20241/metrics 2>/dev/null \
-     | grep -q 'cloudflared_tunnel_ha_connections 1'; then
+     | grep -q 'cloudflared_tunnel_ha_connections [1-9]'; then
   ok "已经在运行，跳过"
 else
   if [ ! -x "$CLOUDFLARED" ]; then
@@ -78,7 +113,7 @@ else
     sleep 1
     printf "."
     curl -s --max-time 2 http://127.0.0.1:20241/metrics 2>/dev/null \
-      | grep -q 'cloudflared_tunnel_ha_connections 1' && break
+      | grep -q 'cloudflared_tunnel_ha_connections [1-9]' && break
   done
   printf "\n"
   ok "隧道已就绪"

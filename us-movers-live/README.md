@@ -205,6 +205,52 @@ docker run -p 8787:8787 us-movers-live
 
 这是可做的，但需要你确认要这条路线，并且要提供一个 FMP Key 用于联调（我无法在没有 Key 的情况下验证这段代码）。
 
+### 方式三：本机运行 + 公网隧道（拿到固定链接）
+
+在本机跑服务，用 Cloudflare 隧道把 `127.0.0.1:8787` 暴露到公网。两条路：
+
+| | 地址 | 说明 |
+|---|---|---|
+| **临时**（quick tunnel） | `https://<随机>.trycloudflare.com` | `bash tools/start.sh` 即可，**不需要任何账号**。但每次重启换域名 |
+| **固定**（命名隧道） | `https://movers.你的域名.com` | 重启/换网络都不变，可以直接发出去 |
+
+#### 固定链接怎么配
+
+**硬约束：Cloudflare 的固定链接必须绑定一个托管在 Cloudflare 的域名。** 没有域名只能用 quick tunnel，而它天生随机 —— 这是产品限制，绕不过去。
+
+两步：
+
+```bash
+# ① 一次性：浏览器里选中你要用的域名（这一步必须交互，脚本代劳不了）
+cloudflared tunnel login
+
+# ② 配置固定链接（幂等，可重复跑）
+bash tools/tunnel-setup.sh movers.你的域名.com
+```
+
+脚本会依次做：检查本地服务 → 检查登录态 → 建/复用命名隧道 → `route dns` 写入 CNAME →
+生成 `~/.cloudflared/config.yml` → 把 launchd plist 从 quick tunnel 换成命名隧道 → 等待握手 → 端到端验证。
+
+之后 `bash tools/share-url.sh` 会自动认出固定链接模式并打印地址。
+
+**域名从哪来**：Cloudflare Registrar 按成本价卖（`.com` 约 $9.15/年，**注册价 = 续费价**，含免费 WHOIS 隐私），
+注册时自动接管 DNS，不用手动改 NS。入口 <https://domains.cloudflare.com/>。
+
+**排障顺序**（每一步失败对应一类不同的故障）：
+
+```bash
+bash tools/share-url.sh     # ① 本机服务在监听？ ② 隧道连着 Cloudflare？ ③ 解析出真实 IP？ ④ 端到端 200？
+tail -f /tmp/cfd-tunnel.log # 隧道自己的日志
+launchctl list | grep chenhunxian
+```
+
+两个容易踩的点：
+
+1. **本机 DNS 被代理接管成 fake-ip（`198.18.x.x`）**，直接 `curl 域名` 永远不通，
+   会被误判成"隧道坏了"。必须先经 DoH 拿真实 IP 再 `curl --resolve` —— `share-url.sh` 已经这么做了，
+   并且**用两个解析源交叉验证**（只信 `1.1.1.1` 会因它偶发抽风而误报）。
+2. **地址分配出来 ≠ 隧道握手完成**，这中间去访问会得到 502。
+
 ---
 
 ## 驱动原因从哪来
@@ -377,9 +423,11 @@ bash tools/test_all.sh          # 一次跑完下面全部（推荐）
 | `test_evening_tabs.js` | 夜盘页标签：点击后**表格与高亮同时**变化、跨页记忆（切走再切回仍停在原档）、分档消失时回落 |
 | `test_morning_tabs.js` | 早盘页「总览 / 个股 / 关注」的**标签记忆**：写入、重开后恢复、脏值与存储不可用时不崩、老记忆值仍有效；以及**关注池确实挂在「关注」页**而不是「个股」页 |
 | `test_night.py` | 夜盘口径：**窗口边界（含周日 20:00 那一场 —— 那天 weekday 是 6，处理不当会被当成周末）**、基准新鲜度守卫、涨跌幅算法与市值折算、成交价窗口校验、**没跑成时不许冻结收盘快照** |
+| `test_tunnel.py` | 固定链接：**用桩 cloudflared**（临时 HOME + 假二进制）在没有真实凭证的情况下验证产出的 `~/.cloudflared/config.yml` 与 launchd plist —— ingress 兜底规则**必须是最后一条**（否则 cloudflared 拒绝启动）、plist 参数顺序 `--config` 必须在 `run` 之前、幂等重跑（隧道已存在 / DNS 记录已存在都要当成功）、以及**非完整域名时报的是友好提示而不是 `unbound variable`** |
 | `visual_check.py` | 工具（非用例）：解码截图量内容底边、找版式空洞、裁剪局部；`align_check.py` 量表格列对齐 |
+| `lint_shell_vars.py` | 检查（非用例，已接进 `test_all.sh` 的语法自检段）：`tools/*.sh` 里有没有 `$VAR` 紧跟中文的写法 —— macOS 自带 **bash 3.2 不是多字节安全的**，`$HOST」` 会被解析成变量 `HOST」`，配合 `set -u` 直接 `unbound variable` 中断（只在跑到那行时才炸） |
 
-前十二个是**回归用例**（退出码非 0 即失败），后两个是排查工具。
+前十四项是**回归用例**（退出码非 0 即失败），后两项是排查工具/静态检查。
 它们的共同理由是「改错了不会报错」：轮询与时段搞错只会静默烧额度或永不刷新，
 删 DOM 元素忘删引用会让页面白屏，标签记忆写漏一处只会"点两下才发现回到默认页"，
 标签选中态漏涂一次只会"点了没反应"（见下），这类问题靠眼睛看很难发现。
