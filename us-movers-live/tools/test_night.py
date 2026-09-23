@@ -50,6 +50,16 @@ def check_true(label, cond, detail=""):
         print("  \u2717 %s  (%s)" % (label, detail))
 
 
+def check_true(label, ok, detail=""):
+    global pass_n, fail_n
+    if ok:
+        pass_n += 1
+        print("  \u2713 %s" % label)
+    else:
+        fail_n += 1
+        print("  \u2717 %s%s" % (label, ("   " + detail) if detail else ""))
+
+
 def section(t):
     print("\n" + t)
 
@@ -254,6 +264,34 @@ try:
     check("overnight_prices 只留下窗口内有成交的票", sorted(q), ["A"])
 finally:
     alpaca.snapshots = real_snapshots
+
+
+
+# ------------------------------------------------ 6. 刷新接口回报成败
+
+section("6. /api/refresh 必须回报**本轮刷新**的成败（前端据此弹「刷新成功 / 失败」）")
+
+"""这一节是**源码级**断言，理由是那个失败模式本身在纯函数层测不到：
+   `/api/refresh` 走的是 HTTP handler，要真起服务才能端到端验（README 里记了 curl 实测）。
+   但"有人把它改回不回报结果"这件事，用源码断言就能挡住 —— 与 test_tab_styles.js
+   读 CSS、test_brand.js 读 CSS 是同一个思路：**改错了不报错，只能靠断言盯。**
+"""
+_HERE = os.path.dirname(os.path.abspath(__file__))
+_ROOT = os.path.dirname(_HERE)
+_srv = open(os.path.join(_ROOT, "server.py"), encoding="utf-8").read()
+_shell = open(os.path.join(_ROOT, "static", "shell.js"), encoding="utf-8").read()
+
+check_true("路由把 do_refresh() 的返回值接住了（曾经是直接丢掉）",
+           "ok = do_refresh()" in _srv and "refresh_ok=ok" in _srv,
+           "少了 ok = do_refresh() / refresh_ok=ok")
+check_true("_movers 把它写进 meta.refresh", 'meta["refresh"]' in _srv)
+check_true("形状固定为 {ok, errors}（前端只认这一个来源）",
+           '"ok": bool(refresh_ok)' in _srv and '"errors": [str(x)' in _srv)
+check_true("只有 /api/refresh 会带它，/api/movers 不带（否则普通取数也会被当成一次刷新）",
+           "_movers(refresh_ok=" in _srv and "_movers()" in _srv)
+check_true("前端判据是 meta.refresh 而不是 body.ok",
+           "meta.refresh" in _shell and "rf.ok" in _shell,
+           "body.ok 的含义是「缓存里有没有数据」，刷新失败时它照样是 true")
 
 
 # ------------------------------------------------------------ 结果

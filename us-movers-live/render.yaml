@@ -6,7 +6,35 @@ services:
     plan: starter
     healthCheckPath: /healthz
     envVars:
+      # 夜盘口径：行情走 Alpaca（免费 Paper 账号即可，见 README「夜盘口径与数据源」）
       - key: SOURCE
-        value: finviz
-      - key: REFRESH_SECONDS
-        value: "60"
+        value: alpaca
+
+      # ⚠️ 这两个必须配，否则服务能起来但**每一轮取数都会失败**
+      #（代码里 SOURCE=alpaca 且无密钥时会直接抛「未配置 ALPACA_KEY_ID」）。
+      # sync: false = 由你在 Render 后台 Environment 里填，不写进这个文件（更不能进 git）。
+      - key: ALPACA_KEY_ID
+        sync: false
+      - key: ALPACA_SECRET_KEY
+        sync: false
+
+      # 夜盘进行中的轮询间隔（秒）。一轮全市场扫描实测 35~90 秒，别设得比它短。
+      - key: NIGHT_POLL_SECONDS
+        value: "180"
+
+      # 只看上涨
+      - key: SHOW_DOWN
+        value: "0"
+
+      # 分档口径（含等于）
+      - key: BIG_MIN_CAP_USD
+        value: "10000000000"
+      - key: MID_MIN_CAP_USD
+        value: "1500000000"
+      - key: BIG_PCT
+        value: "4"
+      - key: MID_PCT
+        value: "10"
+
+      # 旧配置已移除：SOURCE=finviz（涨跌幅只有常规时段，与夜盘口径无关）、
+      # REFRESH_SECONDS（那个环境变量在夜盘口径改造里已经删掉了，留着只会误导）。

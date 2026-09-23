@@ -154,7 +154,12 @@ def read_reasons():
                     out[sym.upper()] = {
                         "driver": text,
                         "from": "reasons",
-                        "tradeDate": meta.get("tradeDate"),
+                        # 日期优先用**条目自己**的场次：原因文件会跨场次累积，而 meta 只有一个
+                        # sessionDate，拿它去标注旧条目会不准。
+                        # ⚠️ 原先这里写的是 meta.get("tradeDate") —— meta 里压根没有这个键
+                        #（只有 sessionDate），所以恒为 None，前端悬停提示的日期一直是「—」。
+                        "tradeDate": (v.get("sessionDate") if isinstance(v, dict) else None)
+                                     or meta.get("sessionDate"),
                         "basis": (v.get("basis") if isinstance(v, dict) else None),
                     }
         except Exception as e:  # noqa: BLE001 —— 原因文件坏了不能让行情表也挂掉
@@ -653,8 +658,12 @@ class Handler(SimpleHTTPRequestHandler):
                                # 不认为在场内，**夜盘就不会自动刷新**，而且页面看着一切正常。
                                "snapshot": current_snapshot()})
         if path == "/api/refresh":
-            do_refresh()
-            return self._movers()
+            # ⚠️ do_refresh() **有返回值**（本轮是否成功写入），以前这里是直接丢掉、
+            # 只回一份行情，导致前端根本无从判断"这次刷新到底成没成" ——
+            # 它只能看 _movers 的 ok，而那个 ok 的含义是"缓存里有没有数据"，
+            # 刷新失败但缓存还有旧数据时它照样是 true，前端会误报"刷新成功"。
+            ok = do_refresh()
+            return self._movers(refresh_ok=ok)
         if path == "/healthz":
             return self._json({"ok": True})
         # 页面路由（左侧菜单用短链接；直接访问 .html 也照常可用）
@@ -702,7 +711,9 @@ class Handler(SimpleHTTPRequestHandler):
         return self._json({"ok": True, "quotes": quotes, "missing": missing, "basis": basis,
                            "message": error})
 
-    def _movers(self):
+    def _movers(self, refresh_ok=None):
+        """行情体。`refresh_ok` 只有 `/api/refresh` 会传 —— 表示**本轮刷新**的成败，
+        与 `ok`（缓存里有没有数据）是两件事，见那处注释。"""
         snap = CACHE.snapshot()
         st = market_state()
         now_et = datetime.now(ET)
@@ -729,6 +740,13 @@ class Handler(SimpleHTTPRequestHandler):
             "autoRefresh": st["open"],
             "errors": CACHE.errors,
         }
+        if refresh_ok is not None:
+            # `errors` 是给页面常驻区看的分组级失败原因；`refresh` 是给"刚刚那次点击"
+            # 看的结论。形状固定成 {ok, errors}，前端只认这一个来源，不去猜。
+            meta["refresh"] = {
+                "ok": bool(refresh_ok),
+                "errors": [str(x) for x in (CACHE.errors or [])],
+            }
         if snap is None:
             return self._json({"ok": False, "meta": meta,
                                "message": "首轮数据尚未就绪，请稍候几秒后刷新"}, 503)

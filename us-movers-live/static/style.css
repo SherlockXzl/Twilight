@@ -90,6 +90,27 @@ button:disabled,button.primary:disabled{cursor:not-allowed;color:var(--ink2);
   background:var(--line);border-color:var(--line)}
 button:disabled:hover{border-color:var(--line)}
 
+/* ---------- 浮层提示（toast）----------
+   「立即刷新」这类**一次性操作的结果**反馈。固定右下角：不占版面、不打断阅读，
+   也不会像常驻说明区那样被下一次 render 覆盖掉。
+
+   两种状态的配色刻意分别对齐站内已有的两套语义色，不新造颜色：
+     · ok  → 绿系（同上方的「开市中」小圆点 #12a150 家族）
+     · err → 红系（同 .panel.err 的 #fdf2f2 / #f2d4d4 / #7a2b2b）
+   注意它们与表格里的**涨红跌绿**不冲突：那是行情语义，这是操作结果语义。 */
+.toast-box{position:fixed;right:22px;bottom:22px;z-index:80;
+  display:flex;flex-direction:column;gap:9px;align-items:flex-end;
+  pointer-events:none}                 /* 容器不吃点击，免得挡住底下的内容 */
+.toast{pointer-events:auto;cursor:pointer;max-width:min(420px,72vw);
+  padding:10px 15px;border-radius:9px;font-size:var(--fs-2);line-height:1.6;
+  border:1px solid;box-shadow:0 6px 20px rgba(16,24,40,.13);
+  word-break:break-word;                /* 后端给的长原因要能折行，不能撑破浮层 */
+  animation:toast-in .18s ease-out}
+.toast.ok{background:#f0fbf4;border-color:#bfe6cf;color:#0a6b3d}
+.toast.err{background:#fdf2f2;border-color:#f2d4d4;color:#7a2b2b}
+.toast.out{opacity:0;transform:translateY(6px);transition:opacity .2s,transform .2s}
+@keyframes toast-in{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
+
 .panel{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:16px 18px;margin-bottom:16px}
 .panel.warn{background:#fff8ea;border-color:#f0dcb4;color:#6b4a00}
 .panel.err{background:#fdf2f2;border-color:#f2d4d4;color:#7a2b2b}
@@ -223,6 +244,9 @@ details.excl summary{cursor:pointer;font-size:var(--fs-4);color:var(--ink2);marg
      副标题让位。字号同步收小，两行 lockup 在这里变一行。 */
   .brand-logo{width:28px;height:28px}
   .brand-mark{font-size:18px;letter-spacing:1px}
+  /* 窄屏浮层铺满一行：右下角固定宽度在手机上会被挤出视口 */
+  .toast-box{right:12px;left:12px;bottom:12px;align-items:stretch}
+  .toast{max-width:none}
   .brand-sub{display:none}
   .nav{flex-direction:row;flex:0 0 auto}
   .nav-item{white-space:nowrap;padding:8px 13px;font-size:var(--fs-3)}

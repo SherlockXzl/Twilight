@@ -60,6 +60,10 @@
     criteriaValues: null,
     /** 当前页面上这份数据的"身份"：basis + sessionDate。变了才重新取数。 */
     snapshotKey: null,
+    /** 后端此刻认定的「是否在夜盘进行中」。按钮可用性靠它，paintRefreshBtn 无参时读这里。 */
+    inSession: undefined,
+    /** 手动刷新进行中。一轮扫描要 1 分钟以上，期间按钮要进加载态，否则像没反应。 */
+    refreshing: false,
     statusTimer: null,
     onData: null,
     /** 口径数值变化时回调（参数是最近一份数据）。页面用它重画分档。 */
@@ -132,7 +136,9 @@
     }
     host.innerHTML =
       '<div class="top-left"><h1>' + U.esc(title) + '</h1></div>' +
-      '<div class="badges">' + badges + '</div>';
+      '<div class="badges">' + badges + '</div>' +
+      // 浮层提示的容器（固定定位，放哪儿都不影响版面）。两个页面共用。
+      '<div id="toastBox" class="toast-box"></div>';
     document.title = title + " · " + SITE.name;
   }
 
@@ -147,6 +153,33 @@
       txt += " · 下次开市 " + new Date(m.nextChangeEt).toLocaleString("zh-CN", { hour12: false });
     }
     if (label) label.textContent = txt;
+  }
+
+  /** 「立即刷新」的完整闭环：置加载态 → 走 /api/refresh → 弹结果 → 复位。
+   *
+   *  为什么结果必须由后端明确回报（`meta.refresh`）而不是前端自己判断：
+   *  这个接口**失败时也回 200**（保留上一份数据继续服务），而 `body.ok` 的含义是
+   *  「缓存里有没有数据」—— 拿它当刷新成败，恰恰会在失败时显示"成功"。
+   */
+  function manualRefresh() {
+    if (state.refreshing) return;
+    state.refreshing = true;
+    paintRefreshBtn();                 // 无参 → 从 state 读，进加载态
+    Promise.resolve(fetchLive(true))
+      .then(function (r) {
+        if (!r) return;                // 被并发保护拦下（force 正常不会走到）
+        if (r.ok) toast("刷新成功", "ok");
+        else toast("刷新失败：" + r.reason, "err");
+      })
+      .catch(function (e) {
+        /* 兜底：fetchLive 内部已把异常转成结论，这里只防它自身抛错 ——
+           **任何情况下都要有反馈**，静默失败比报错更糟。 */
+        toast("刷新失败：" + ((e && e.message) || "未知错误"), "err");
+      })
+      .finally(function () {
+        state.refreshing = false;
+        paintRefreshBtn();
+      });
   }
 
   /** 记录并渲染后端给的交易时段。这里**只更新徽章** —— 不再有任何"因为开盘/休市
@@ -183,6 +216,7 @@
         var snap = j.snapshot || {};
         /* 按钮可用性跟着心跳走：夜盘 08:00 开始那一刻会自动亮起来，
            16:00 收盘后自动灰掉 —— 不必让用户重新打开页面。 */
+        state.inSession = snap.inSession;
         paintRefreshBtn(snap.inSession);
 
         /* 取不取数，分两种情况（2026-09-22 口径换成夜盘后重写）：
@@ -232,6 +266,18 @@
   function paintRefreshBtn(inSession) {
     var b = $("btnRefresh");
     if (!b) return;                     // daily 模式没有这个按钮
+    if (inSession === undefined) inSession = state.inSession;
+
+    /* 刷新进行中：禁用 + 换文案。**必须单独一个分支**，不能只靠 inSession ——
+       夜盘开市中按钮本就可点，点下去之后若还按 inSession 画，它会一直显示
+       「立即刷新」、看着像没反应，而一轮扫描要 1 分钟以上。 */
+    if (state.refreshing) {
+      b.disabled = true;
+      b.textContent = "刷新中…";
+      b.title = "正在取一轮数据，约需 1 分钟";
+      return;
+    }
+    b.textContent = "立即刷新";
     var usable = inSession !== false;
     b.disabled = !usable;
     b.title = usable
@@ -298,6 +344,57 @@
     el.innerHTML = msgs.map(U.esc).join("<br>");
   }
 
+  /* ------------------------------------------------------ 浮层提示（toast） */
+  /* 全站唯一的「一次操作的结果」反馈。
+     为什么不复用页面里那个常驻的 .notice 说明区：它讲的是**口径与时段**（长期状态），
+     而刷新结果是一次性事件 —— 混进去会被下一次 renderNotice 直接覆盖掉；
+     而且它在页面下方，用户点完右上角的按钮根本看不到。
+
+     停留时长刻意不等：成功 3.2 秒够了；**失败给 8 秒** —— 上面带着原因，得留出读的时间。 */
+  var TOAST_MS = { ok: 3200, err: 8000 };
+  //: 原因截断上限。toast 是一行浮层，把一整串错误堆上去反而看不见重点。
+  var TOAST_MAX = 160;
+  var toastSeq = 0;
+
+  function toast(msg, kind) {
+    var k = kind === "ok" ? "ok" : "err";
+    var text = String(msg == null ? "" : msg);
+    if (text.length > TOAST_MAX) text = text.slice(0, TOAST_MAX - 1) + "…";
+
+    var box = $("toastBox");
+    /* 容器没就绪就静默不弹 —— 浮层只是反馈，**绝不能因为它让刷新流程出错**。 */
+    if (!box || !document.createElement) return null;
+    var el = document.createElement("div");
+    el.className = "toast " + k;
+    el.setAttribute("data-t", "t" + (++toastSeq));
+    el.textContent = text;
+    el.title = "点击关闭";
+    el.addEventListener("click", function () { dropToast(el); });
+    box.appendChild(el);
+    setTimeout(function () { dropToast(el); }, TOAST_MS[k]);
+    return el;
+  }
+
+  function dropToast(el) {
+    if (!el || !el.parentNode) return;
+    el.className += " out";
+    setTimeout(function () {
+      if (el.parentNode) el.parentNode.removeChild(el);
+    }, 200);
+  }
+
+  /** 从后端给的 errors 里挑一句能读的。可能有好几条，只取第一条 + 剩余条数 —— */
+  function refreshFailReason(errors, fallback) {
+    var list = [];
+    for (var i = 0; i < (errors || []).length; i++) {
+      if (errors[i]) list.push(String(errors[i]));
+    }
+    if (list.length) {
+      return list.length > 1 ? list[0] + "（另 " + (list.length - 1) + " 项）" : list[0];
+    }
+    return fallback || "服务未返回具体原因";
+  }
+
   function showError(msg) {
     var el = $("notice");
     if (!el) return;
@@ -313,13 +410,21 @@
 
   /** live 模式：行情接口；force=true 时走 /api/refresh 强制重抓 */
   function fetchLive(force) {
-    if (liveFetching) return;
+    /* 并发保护。**force（用户点了「立即刷新」）时不受它拦** ——
+       那是用户的明确动作，被一个内部标志静默吞掉，会让人以为"点了没反应"。
+       真并发也不会打乱后端：do_refresh 自带 CACHE.refreshing 重入保护，
+       第二次会立刻返回 false，前端如实弹「刷新失败：…」。
+       返回 Promise 是给手动刷新用的：它得知道这次到底成没成，才能弹对应提示。 */
+    if (liveFetching && !force) return Promise.resolve(false);
     liveFetching = true;
     var url = force ? "/api/refresh" : "/api/movers";
     return fetch(url, { cache: "no-store" })
       .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, body: j }; }); })
       .then(function (res) {
-        if (!res.body || !res.body.meta) return;
+        if (!res.body || !res.body.meta) {
+          if (force) return { ok: false, reason: "后端返回内容不完整" };
+          return;
+        }
         var meta = res.body.meta;
         state.data = res.body;
         /* 交易时段以 /api/status 为准，但每份行情也自带一份 ——
@@ -333,6 +438,7 @@
            /api/status 先到，不画的话按钮会停在"未知"态（可用），
            场外进来会看到几秒的亮按钮。 */
         state.snapshotKey = (s2.inSession ? "live" : "close") + "|" + (s2.sessionDate || "?");
+        state.inSession = s2.inSession;
         paintRefreshBtn(s2.inSession);
         renderSnapshotBadge(meta);
         /* 取数时间：接口给的 fetchedAtEt 就是「这份数据对应的美东时刻」。
@@ -344,8 +450,19 @@
         renderNotice(meta);
         if (state.onData) state.onData(res.body);
         if (!res.ok) showError(res.body.message || "数据尚未就绪");
+
+        if (!force) return;
+        /* 成败**只认后端明确回报的 meta.refresh**，不去猜：
+           这个接口失败时也回 200（只是保留上一份数据），而 body.ok 的含义是
+           "缓存里有没有数据" —— 拿它判，刷新失败会被报成"成功"。 */
+        var rf = meta.refresh || {};
+        if (rf.ok) return { ok: true };
+        return { ok: false, reason: refreshFailReason(rf.errors, res.body.message) };
       })
-      .catch(function (e) { showError("无法连接后端服务：" + e.message); })
+      .catch(function (e) {
+        showError("无法连接后端服务：" + e.message);
+        if (force) return { ok: false, reason: "无法连接后端服务：" + e.message };
+      })
       /* ⚠️ 这个复位**必须有**：上面成功分支里有一处提前 return（body/meta 缺失），
          只在成功路径末尾复位会漏掉它 —— 标志一旦卡在 true 就永久不再取数，
          页面看着正常，其实再也不会更新。用 finally 覆盖所有出口。 */
@@ -416,7 +533,7 @@
       /* 置灰时浏览器本就不会派发 click，这里再挡一道 —— 防的是
          "样式/属性没生效但按钮其实还能点"这类错位：用户看到的是灰按钮，却真的刷新了。 */
       if (this.disabled) return;
-      fetchLive(true);
+      manualRefresh();
     });
     // 没有「暂停自动」按钮了：本来就没有东西在自动跑，留个按钮只会让人以为有。
     // 也没有取数定时器 —— 只在进页面时取一次，之后靠 loadStatus 发现"快照换了"再取。
