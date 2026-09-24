@@ -299,9 +299,13 @@
     return n;
   }
 
-  /* 口径行必须写出**当前实际生效的数字**，不能写死 100/15 ——
-     和夜盘异动页的 criteria 行是同一个道理（展示与逻辑同源）。
-     末句交代「低于下限的不计入分档」，否则「所有」的条数会大于两档之和而没人解释。 */
+  /* 这一段同时是**分档说明**和**入榜口径说明** —— 2026-09-24 起两者是同一组数字：
+     名单只收「大市值 ≥100亿 & 涨幅 ≥4%」和「小市值 15–100亿 & 涨幅 ≥10%」，
+     低于 15 亿的全部剔除，所以分档按钮切出来的就是这两段，不会出现"某行不在任何档里"。
+
+     数字**从 /api/status 的 criteriaValues 拿**（源头 screening.py 的 CFG，与夜盘页同一份），
+     不写死 100/15 —— 写死就会出现「页面写着 100 亿、逻辑却按别的数切」。
+     改口径时要一起看的是 screening.py 的 cfg_from_env（night 页与 morning_fetch 都读它）。 */
   function bandHtml() {
     var rows = (data() && data().movers) || [];
     if (!rows.length) return "";
@@ -311,9 +315,10 @@
              '<span class="n">' + n[b.key] + "</span></button>";
     }).join("");
     return '<div class="tabs tabs--filter" id="mvBands">' + chips + "</div>" +
-      '<p class="hint band-note">分档按总市值：大市值 ≥ ' + yi(cfg.bigMin) +
-      ' 亿美元；小市值 ' + yi(cfg.midMin) + "–" + yi(cfg.bigMin) +
-      " 亿美元；低于 " + yi(cfg.midMin) + " 亿美元的不计入分档（仍留在「所有」里）。</p>";
+      '<p class="hint band-note">入榜口径与「夜盘异动」页一致：大市值 ≥ ' + yi(cfg.bigMin) +
+      ' 亿美元且涨幅 ≥ 4%；小市值 ' + yi(cfg.midMin) + "–" + yi(cfg.bigMin) +
+      " 亿美元且涨幅 ≥ 10%；低于 " + yi(cfg.midMin) +
+      " 亿美元的全部剔除（入榜前已排除，两档计数之和即总数）。上方按钮用于只看其中某一档。</p>";
   }
 
   function bandButtons() { return $("mvBands").querySelectorAll(".tab"); }

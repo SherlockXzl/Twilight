@@ -9,5 +9,8 @@ __pycache__/
 data/*.json
 !data/.gitkeep
 
+# 全档校验的按日缓存（morning_fetch.py 的 wide_scan 写；可丢，丢了就是重抓一遍）
+data/cache/
+
 # macOS
 .DS_Store
