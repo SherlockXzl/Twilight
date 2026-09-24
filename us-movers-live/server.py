@@ -23,6 +23,7 @@ Finviz 的涨跌幅一律是**常规时段**的，与夜盘无关，连它的 El
 美东 20:00–04:00 那段（实测结论见 README）。
 """
 
+import gzip
 import json
 import os
 import re
@@ -41,6 +42,7 @@ import providers
 import screening
 import settings
 import symbols
+import taxonomy_zh
 
 settings.load()               # 让 .env 里的密钥/口径在 server 启动时生效（幂等）
 
@@ -54,6 +56,10 @@ MORNING_PATH = os.path.join(BASE_DIR, "data", "morning.json")
 #: 夜盘异动「驱动原因」列的数据文件，结构与生成方式见 README 的「驱动原因从哪来」一节。
 #: 同样只读：由智能体在盘后分析写入，页面不自己抓新闻。
 REASONS_PATH = os.path.join(BASE_DIR, "data", "reasons.json")
+
+#: 全市场美股目录（「明暗对照」页）。由 tools/build_us_catalog.py 抓 Finviz 生成后写入，
+#: 服务端只读 —— 那份抓取要翻几百页、跑十几分钟，绝不能挂在任何一次页面请求上。
+US_CATALOG_PATH = os.path.join(BASE_DIR, "data", "us_catalog.json")
 
 ET = ZoneInfo("America/New_York")
 CST = ZoneInfo("Asia/Shanghai")
@@ -90,6 +96,7 @@ PAGE_ROUTES = {
     "/": "/index.html",
     "/evening": "/index.html",      # 夜盘异动
     "/morning": "/morning.html",    # 早盘总结
+    "/linkage": "/linkage.html",    # 明暗对照（全市场美股目录）
 }
 
 #: 站点图标。页面里已用 <link rel="icon"> 指到 logo.png，但浏览器在书签、
@@ -97,6 +104,76 @@ PAGE_ROUTES = {
 #: 绕过页面里那条 <link>。统一在这里接住并指向同一张 logo.png ——
 #: 省得再维护一份 .ico，日志里也不会刷 404。
 FAVICON_ROUTE = "/logo.png"
+
+
+# ---------------------------------------------------------------- 明暗对照
+
+#: 数据文件里哪些行业名不算「公司」，展示时剔掉（小写子串匹配）。
+#: 这一页是给「查这家公司是什么的」用的，基金与空壳塞进来只会污染列表 ——
+#: 原始 10559 条里，基金 5973 条 + SPAC 空壳 307 条，合计占了 59%。
+#:
+#: ⚠️ **杠杆产品不需要单独识别**：TQQQ（3x 做多纳指）、GDXU（3X 杠杆 ETN）、
+#: SQQQ、SOXL/SPXL 这些在 Finviz 里一律归在 "Exchange Traded Fund" 下，
+#: 按行业过滤就一并去掉了 —— 单看代码/名称反而更容易出错。
+#:
+#: ⚠️ **千万不要改成按名称里的杠杆词过滤**。实测那会误杀真公司，而且是成片的：
+#:     UCTT Ultra Clean Hldgs · RARE Ultragenyx · DJCO Daily Journal
+#:     BLSH Bullish · BBAI BigBear.ai · CART Maplebear · RBC Bearings
+#:   它们只是名字里恰好带 ultra / daily / bull / bear，都是正常上市公司。
+#:   （symbols.py 里那套 _LEV_HINTS 是给**搜索建议排序**用的"沉底"，不是删除，
+#:     两者目的相反，不要混用。）
+#:
+#: ⚠️ 空壳那条**必须写全 "shell companies"，不能用缩写 "spac"** ——
+#:   子串匹配下 "spac" 会命中 "Aerospace & Defense"，一杀就是 82 家真公司。
+#:   同理不要按名称里的 Warrant / Preferred / Rights 过滤：实测那些命中
+#:   （PFBC、BRSL、BRSP、BTSG）全是正常上市公司，只是名字里带这些词。
+_FUND_INDUSTRY_KEYS = ("exchange traded fund", "fund", "shell companies")
+
+
+def read_us_catalog():
+    """读取全市场美股目录，剔掉基金与 SPAC 空壳，并把板块/行业译成中文。
+
+    **译名与过滤都在这一层做，不写进数据文件**：两者都属于展示层 ——
+    改译名或改过滤口径只要重启服务，不必重跑一次十几分钟的抓取。
+    数据文件因此保留**全量**（含 etfCount / fundCount 等统计），可追溯、可回溯。
+
+    英文原名照常返回（sectorEn / industryEn），前端用作列的 title 与下拉的搜索词，
+    这样输入 "semi" 也能命中「半导体」。
+
+    文件不存在时返回 ok=False + 可操作的中文说明，不返回空列表让前端白屏 ——
+    这份目录是外部产物，缺了就得去跑那个脚本，页面要能说清这一点。
+    """
+    if not os.path.exists(US_CATALOG_PATH):
+        return {"ok": False,
+                "message": "美股目录尚未生成。先跑 tools/build_us_catalog.py "
+                           "生成 data/us_catalog.json。"}
+    try:
+        with open(US_CATALOG_PATH, encoding="utf-8") as f:
+            d = json.load(f)
+    except (OSError, ValueError) as e:
+        return {"ok": False, "message": "美股目录读取失败：%s" % e}
+
+    rows, skipped = [], 0
+    for r in d.get("rows") or []:
+        sec, ind = r.get("sector") or "", r.get("industry") or ""
+        low = ind.lower()
+        if any(k in low for k in _FUND_INDUSTRY_KEYS):
+            skipped += 1
+            continue
+        rows.append({
+            "symbol": r.get("symbol") or "",
+            "name": r.get("name") or "",
+            "sector": taxonomy_zh.sector_zh(sec) if sec else "",
+            "industry": taxonomy_zh.industry_zh(ind) if ind else "",
+            "sectorEn": sec,
+            "industryEn": ind,
+        })
+    return {"ok": True, "count": len(rows),
+            "rawCount": len(d.get("rows") or []),
+            "skippedFund": skipped,
+            "builtAt": d.get("builtAt") or "",
+            "source": d.get("source") or "",
+            "rows": rows}
 
 
 # ---------------------------------------------------------------- 早盘总结
@@ -133,10 +210,10 @@ def read_morning():
     return data
 
 
-# ---------------------------------------------------------------- 驱动原因
+# ---------------------------------------------------------------- 驱动原因 / A 股映射
 
 def read_reasons():
-    """夜盘异动「驱动原因」列的数据。
+    """夜盘异动「驱动原因」列与「A 股映射」列的数据。
 
     取数分两层，**口径与早盘页的「个股异动榜 · 驱动原因」完全一致**（都是分析后的整句话）：
 
@@ -146,6 +223,10 @@ def read_reasons():
 
     都找不到就没有这个代码的键，前端显示「待确认」（与早盘页同一写法），
     不编造。文件不存在/损坏只影响这一列，不影响行情表。
+
+    每条除 driver 外还带 `aShareMap`（「A 股映射」弹窗的内容，结构见 README）。
+    服务端**只当搬运工**：字段取舍、强度徽章配色、风险文案全在 `static/sharemap.js`
+    里做 —— 映射的结构以后还会长，能不改后端就别改（改了要重启服务）。
     """
     out, meta = {}, {}
 
@@ -156,9 +237,13 @@ def read_reasons():
             meta = data.get("meta") or {}
             for sym, v in (data.get("reasons") or {}).items():
                 text = v.get("driver") if isinstance(v, dict) else v
-                if text:
+                a_map = (v.get("aShareMap") if isinstance(v, dict) else None) or None
+                # 有原因**或**有映射就建条目。两者是各自独立的产物：映射生成得更晚，
+                # 「有原因、还没映射」是常态中间态。原先只认 driver，会导致
+                # 一条只有映射的记录整个被丢掉、弹窗永远读不到内容。
+                if text or a_map:
                     out[sym.upper()] = {
-                        "driver": text,
+                        "driver": text or "",
                         "from": "reasons",
                         # 日期优先用**条目自己**的场次：原因文件会跨场次累积，而 meta 只有一个
                         # sessionDate，拿它去标注旧条目会不准。
@@ -167,6 +252,7 @@ def read_reasons():
                         "tradeDate": (v.get("sessionDate") if isinstance(v, dict) else None)
                                      or meta.get("sessionDate"),
                         "basis": (v.get("basis") if isinstance(v, dict) else None),
+                        "aShareMap": a_map,
                     }
         except Exception as e:  # noqa: BLE001 —— 原因文件坏了不能让行情表也挂掉
             meta = {"error": "reasons.json 无法解析：%s" % e}
@@ -179,7 +265,10 @@ def read_reasons():
             for r in (m.get("movers") or []):
                 sym = (r.get("symbol") or r.get("code") or "").upper()
                 if sym and sym not in out and r.get("driver"):
-                    out[sym] = {"driver": r["driver"], "from": "morning", "tradeDate": td}
+                    out[sym] = {"driver": r["driver"], "from": "morning", "tradeDate": td,
+                                # 早盘页目前不生成 A 股映射，这里照样透传是为了
+                                # 将来早盘补上同一列时，夜盘页不必再改一遍服务端。
+                                "aShareMap": r.get("aShareMap") or None}
     except Exception:  # noqa: BLE001
         pass
 
@@ -646,10 +735,22 @@ class Handler(SimpleHTTPRequestHandler):
 
     def _json(self, obj, code=200):
         body = json.dumps(obj, ensure_ascii=False, default=str).encode("utf-8")
+        # 大于 1KB 的响应做 gzip。触发这一条的是「明暗对照」的全市场目录：
+        # 不压是 1.92MB，每次开页面都要在隧道上搬近两兆；压完约 350KB。
+        # 小响应不压 —— 省下的字节还不够多一个响应头。
+        # `Vary` 必须带上：同一个 URL 对不同 Accept-Encoding 的客户端返回不同字节，
+        # 少了它，中间层可能把压缩版喂给不支持 gzip 的客户端。
+        encoding = None
+        if len(body) > 1024 and "gzip" in (self.headers.get("Accept-Encoding") or "").lower():
+            body = gzip.compress(body, 6)
+            encoding = "gzip"
         self.send_response(code)
         self.send_header("Content-Type", "application/json; charset=utf-8")
+        if encoding:
+            self.send_header("Content-Encoding", encoding)
         self.send_header("Content-Length", str(len(body)))
         self.send_header("Cache-Control", "no-store")
+        self.send_header("Vary", "Accept-Encoding")
         self.end_headers()
         self.wfile.write(body)
 
@@ -665,6 +766,8 @@ class Handler(SimpleHTTPRequestHandler):
             return self._symbols()
         if path == "/api/reasons":
             return self._json(read_reasons())
+        if path == "/api/us-catalog":
+            return self._json(read_us_catalog())
         if path == "/api/status":
             return self._json({"ok": True, "market": market_state(),
                                "source": SOURCE, "criteria": CRITERIA,

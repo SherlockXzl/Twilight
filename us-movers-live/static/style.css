@@ -293,11 +293,65 @@ details.excl summary{cursor:pointer;font-size:var(--fs-4);color:var(--ink2);marg
    这里只定义两页共有的那一列：
      td.why  驱动原因，是一整句话，必须放开宽度，否则会挤成一条竖线 */
 td.why{color:var(--ink2);font-size:var(--fs-2);min-width:340px;line-height:1.65}
-/* 最小宽度：基础表 1160px + 驱动原因列。
-   两页列集合已完全相同（代码/公司全称/价格/涨跌幅/总市值/板块/行业/驱动原因），
-   所以最小宽度也取同一个值 —— 同一宽度下两页每列的宽窄与换行位置一致，
-   横向滚动出现的位置也一致。 */
-table.t-movers,table.t-evening{min-width:1560px}
+/* 最小宽度：基础表 1160px + 驱动原因列 + 映射列。
+   ⚠️ 两页**不再同宽**：夜盘页多了「A 股映射」列（用户 2026-09-24 要求），
+   比早盘页宽出一个按钮列。早盘页将来要加同一列时，把两条并回一行即可。
+   夜盘这条 = 1560 + 208（映射列宽，见上面那节）—— 两处必须一起改。 */
+table.t-movers{min-width:1560px}
+table.t-evening{min-width:1768px}
+
+/* ---------- 夜盘异动：「A 股映射」列 ---------- */
+/* 列里只有一个按钮，居中放，让它自己不抢宽度。
+   宽度 2026-09-24 从 104px 提到 208px（用户要求「再宽一倍」）——
+   104px 时按钮几乎贴着单元格边缘，点击目标也偏小。
+   ⚠️ 改这个值要同步改下面 table.t-evening 的 min-width，两边是加法关系：
+      1560（8 列基准）+ 208（本列）= 1768。只改一边的后果是列被挤回原宽。
+
+   `vertical-align:middle` 是**刻意覆盖全局**的：上面 `tbody td` 把单元格设成了
+   `top`，那是为驱动原因列（一整句话，能折三四行）定的 —— 文字顶对齐才整齐。
+   但这一列只有一个按钮，跟着顶对齐就会贴在某一行文本的高度上，看着像悬在半空
+   （用户 2026-09-24 指出）。这里改回居中，让按钮落在整行的垂直中线上。
+   优先级够：`td.map`(0,1,1) > `tbody td`(0,0,2)，不必加 !important。 */
+th.map,td.map{width:208px;text-align:center;vertical-align:middle;
+  padding-left:8px;padding-right:8px}
+/* 按钮自身也标上 middle：单元格里将来若多一个小字提示，两者会按同一基线对齐，
+   不至于一个居中一个贴在行盒顶部。 */
+.map-btn{vertical-align:middle;font:inherit;font-size:var(--fs-2);padding:5px 12px;
+  border-radius:7px;border:1px solid #bcd3f0;background:#f4f8fe;color:var(--blue);
+  cursor:pointer;white-space:nowrap}
+.map-btn:hover{background:#e8f1fd;border-color:#9dc2ee}
+/* 没有分析结果时仍是可点的（点开有说明），只是弱化成灰色 ——
+   一眼能扫出"哪些票已经有映射"，又不至于让人以为坏了。 */
+.map-btn--none{border-color:var(--line);background:var(--card);color:var(--ink3)}
+.map-btn--none:hover{background:#f7f9fb;border-color:var(--line);color:var(--ink2)}
+
+/* ---------- 「明暗对照」的全市场目录表 ---------- */
+/* 只有 4 列（代码 / 公司全称 / 板块 / 行业），所以**不能**沿用上面那条 1560px ——
+   那是给 8 列行情表算的，套在 4 列上每列会被拉到近 400px，内容稀疏得看不出是一张表。
+   单元格样式（td.code / td.name / td.sec / td.ind）都是全站共用的，
+   这里因此只压表宽，不重定义任何单元格规则（理由同上一条注释）。 */
+table.t-catalog{min-width:760px}
+
+/* ---------- 「明暗对照」的分页条 ---------- */
+/* 这张表改成每页 100 条之后，上面那条 content-visibility 其实已用不太上
+   （100 行的排版开销可以忽略），留着是为了万一哪天把每页条数调大。 */
+.pager{display:flex;flex-wrap:wrap;align-items:center;justify-content:center;gap:6px;
+  margin:16px 0 2px;font-size:var(--fs-2);color:var(--ink2)}
+/* 只有一页时 renderPager() 会把内容清空 —— 别在表下留一条无名空白 */
+.pager:empty{display:none}
+.pager button{font:inherit;font-size:var(--fs-2);min-width:36px;padding:6px 10px;
+  border:1px solid var(--line);border-radius:7px;background:var(--card);color:var(--ink);
+  cursor:pointer;font-variant-numeric:tabular-nums}
+.pager button:hover:not(:disabled){border-color:#bcd3f0;background:#fbfdff}
+.pager button.on{background:var(--blue);border-color:var(--blue);color:#fff;font-weight:600}
+.pager button:disabled{color:var(--ink3);opacity:.55;cursor:default}
+.pager .pg-gap{color:var(--ink3);padding:0 2px}
+.pager .pg-info{margin-left:8px;color:var(--ink3);font-size:var(--fs-1)}
+/* 这张表有一万多行，一次全量插进 DOM 后浏览器要逐行排版 —— 加这一条让它
+   **只渲染视口内的行**（滚到哪渲染到哪），首屏从秒级降到几乎无感。
+   `contain-intrinsic-size` 的 41px 是实测行高：不给的话浏览器算不出总高，
+   滚动条长度会错、滚动位置会跳。不认识这两条的老浏览器整条忽略，不影响可用。 */
+table.t-catalog tbody tr{content-visibility:auto;contain-intrinsic-size:auto 41px}
 
 /* 标签（A 股标的用；表格里的状态药丸复用全站的 .band） */
 .chip{display:inline-block;font-size:var(--fs-1);color:var(--ink2);background:var(--card);
@@ -461,5 +515,106 @@ table.t-movers,table.t-evening{min-width:1560px}
 
   /* 关注池方块在更宽的版面里多排一列，避免留出半行空白 */
   .tiles{grid-template-columns:repeat(auto-fill,minmax(160px,1fr))}
+}
+
+/* ==================================================================
+   通用弹窗（static/modal.js）
+   ------------------------------------------------------------------
+   原生 <dialog> 的默认样式各浏览器差异大（居中方式、背景遮罩、内边距都不同），
+   与其到处写 UA 覆盖，不如自己搭一层。层次取 z-index:100 —— 高于
+   .combo-pop 的 30（筛选下拉），低于任何系统级提示。
+
+   遮罩用 fixed + inset:0 铺满；[hidden] 那条必须写，否则 .modal-mask 的
+   display:flex 会盖掉 hidden 属性自带的 display:none（属性选择器优先级更高，
+   所以这条能赢，不是冗余）。
+   ================================================================== */
+.modal-mask{position:fixed;inset:0;z-index:100;background:rgba(22,25,29,.46);
+  display:flex;align-items:center;justify-content:center;padding:30px 22px}
+.modal-mask[hidden]{display:none}
+.modal{display:flex;flex-direction:column;width:min(940px,100%);max-height:100%;
+  background:var(--card);border-radius:12px;box-shadow:0 18px 48px rgba(22,25,29,.26)}
+.modal-hd{display:flex;align-items:flex-start;gap:14px;
+  padding:18px 20px 14px;border-bottom:1px solid var(--line)}
+.modal-hd-tx{flex:1 1 auto;min-width:0}
+.modal-title{margin:0;font-size:var(--fs-5);font-weight:600;color:var(--ink);line-height:1.45}
+.modal-sub{margin:5px 0 0;font-size:var(--fs-2);color:var(--ink3)}
+.modal-sub[hidden]{display:none}
+.modal-x{flex:0 0 auto;font:inherit;font-size:var(--fs-4);line-height:1;padding:6px 9px;
+  border:1px solid var(--line);border-radius:7px;background:var(--card);
+  color:var(--ink3);cursor:pointer}
+.modal-x:hover{background:#f7f9fb;color:var(--ink)}
+/* 内容区自己滚，页头固定 —— 否则长内容会把关闭按钮顶出视口 */
+.modal-bd{padding:18px 20px 22px;overflow-y:auto}
+
+/* ==================================================================
+   「A 股映射」弹窗内容（static/sharemap.js）
+   ------------------------------------------------------------------
+   内容全部来自分析结果（us-stock-to-a-share-mapper 技能），这里只负责排版。
+   配色沿用全站变量；强度徽章用「浅底 + 深字」而不是实心色块 ——
+   弹窗里会有 5~10 个徽章并排出现，实心色块会把视线全吸走。
+   ================================================================== */
+.sm-in{background:#f4f8fe;border:1px solid #d9e7f8;border-radius:9px;
+  padding:11px 14px;margin-bottom:14px}
+.sm-in-h{font-size:var(--fs-1);color:var(--blue);font-weight:600;letter-spacing:.4px;
+  margin-bottom:5px}
+.sm-in-b{margin:0;font-size:var(--fs-2);color:var(--ink2);line-height:1.7}
+.sm-cats{display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin-bottom:12px;
+  font-size:var(--fs-2);color:var(--ink3)}
+.sm-cat{padding:2px 9px;border-radius:20px;background:#f2f6fb;color:var(--ink2);
+  font-size:var(--fs-1)}
+.sm-break{margin:0 0 16px;font-size:var(--fs-2);color:var(--ink2);line-height:1.75}
+.sm-break b,.sm-cats b{color:var(--ink3);font-weight:500;margin-right:6px}
+.sm-h{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;
+  margin:20px 0 10px;font-size:var(--fs-4);font-weight:600;color:var(--ink)}
+.sm-h:first-of-type{margin-top:4px}
+.sm-legend{font-size:var(--fs-1);font-weight:400;color:var(--ink3)}
+.sm-list{display:flex;flex-direction:column;gap:9px}
+.sm-item{border:1px solid var(--line);border-left:3px solid var(--line);
+  border-radius:9px;padding:11px 14px}
+/* 左侧竖条的颜色即强度：扫一眼就知道哪些是硬关联 */
+.sm-item--S{border-left-color:var(--red)}
+.sm-item--A{border-left-color:var(--amber)}
+.sm-item--B{border-left-color:var(--blue)}
+.sm-item--C,.sm-item--D{border-left-color:#c8cfd8}
+.sm-item-hd{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.sm-badge{flex:0 0 auto;width:20px;height:20px;border-radius:5px;font-size:var(--fs-1);
+  font-weight:700;line-height:20px;text-align:center;border:1px solid transparent}
+.sm-badge--S{background:#fdecef;color:var(--red);border-color:#f6c9d2}
+.sm-badge--A{background:#fdf3e2;color:var(--amber);border-color:#f0dcb4}
+.sm-badge--B{background:#eef4fd;color:var(--blue);border-color:#c9ddf7}
+.sm-badge--C,.sm-badge--D{background:#f4f6f8;color:var(--ink3);border-color:var(--line)}
+.sm-mk{font-size:var(--fs-1);color:var(--ink3);border:1px solid var(--line);
+  border-radius:4px;padding:0 4px;line-height:16px}
+.sm-code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:var(--fs-3);
+  color:var(--ink);font-weight:600;font-variant-numeric:tabular-nums}
+.sm-name{font-size:var(--fs-3);color:var(--ink);font-weight:500}
+.sm-tag{font-size:var(--fs-1);color:var(--ink2);background:#f4f6f8;
+  border-radius:20px;padding:2px 9px}
+.sm-reason{margin:9px 0 0;font-size:var(--fs-2);color:var(--ink2);line-height:1.7}
+.sm-meta{display:flex;flex-wrap:wrap;gap:6px 22px;margin-top:8px}
+.sm-m{flex:1 1 260px;min-width:0;font-size:var(--fs-1);color:var(--ink3);line-height:1.6}
+.sm-m b{color:var(--ink3);font-weight:600;margin-right:5px}
+/* 这里原有一条 `.sm-m:last-child{color:#a2a9b3}` —— 给每只票末尾的「风险」降色。
+   2026-09-24 按用户要求去掉了个股风险行，卡片底部只剩「证据」，
+   那条规则会转而把证据也调淡（选择器不看内容），所以一并删掉。
+   恢复风险行时把它加回来。 */
+.sm-logic,.sm-risks{margin:0;padding-left:20px;font-size:var(--fs-2);
+  color:var(--ink2);line-height:1.75}
+.sm-logic li,.sm-risks li{margin-bottom:5px}
+.sm-risks{color:var(--ink3)}
+.sm-note{margin:16px 0 0;padding:10px 13px;background:#f7f8fa;border-radius:8px;
+  font-size:var(--fs-1);color:var(--ink3);line-height:1.7}
+.sm-gen{margin:10px 0 0;font-size:var(--fs-1);color:#a2a9b3}
+.sm-empty{padding:22px 4px;color:var(--ink2)}
+.sm-empty p{margin:0 0 10px;font-size:var(--fs-3)}
+.sm-empty p.hint{font-size:var(--fs-2);color:var(--ink3);line-height:1.75}
+.sm-empty code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;
+  font-size:var(--fs-1);background:#f2f4f7;border-radius:4px;padding:1px 5px}
+
+@media(max-width:760px){
+  .modal-mask{padding:16px 12px}
+  .modal-hd{padding:14px 15px 12px}
+  .modal-bd{padding:14px 15px 18px}
+  .sm-m{flex:1 1 100%}
 }
 

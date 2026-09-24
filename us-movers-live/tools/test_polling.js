@@ -89,13 +89,19 @@ function jsonRes(obj) { return Promise.resolve({ ok: true, json: () => Promise.r
    **刷新失败时它依然是 true** —— 这正是新用例要守住的那个坑。 */
 let refreshReply = { ok: true, errors: [] };
 let netFail = false;
+/* 取数时间用**可变的**，好让用例验「有值时显示北京时间」与「null 时显示 —」两种分支。
+   两个口径刻意差 12 小时（北京 UTC+8 / 美东夏令时 UTC-4），
+   这样"页面到底取了哪一个"一眼可判 —— 两个值若相等，这条断言等于没测。 */
+let fetchedAtReply = "2026-09-23 10:15:26";      // 北京
+const FETCHED_AT_ET = "2026-09-22 22:15:26";     // 同一时刻的美东
 
 global.fetch = function (url) {
   calls.push(url);
   if (netFail) return Promise.reject(new Error("Failed to fetch"));
   if (url === "/api/status") return jsonRes({ ok: true, market, snapshot: held });
   if (url === "/api/movers" || url === "/api/refresh") {
-    const meta = { market, snapshot: held, criteria: {}, fetchedAtEt: "2026-09-22 10:15:26",
+    const meta = { market, snapshot: held, criteria: {},
+                   fetchedAt: fetchedAtReply, fetchedAtEt: FETCHED_AT_ET,
                    source: "test" };
     if (url === "/api/refresh") meta.refresh = refreshReply;
     return jsonRes({ ok: true, meta, tables: {}, counts: {}, excluded: [] });
@@ -122,6 +128,7 @@ function section(t) { console.log("\n" + t); }
 const tick = () => new Promise(r => setTimeout(r, 30));
 const countOf = u => calls.filter(x => x === u).length;
 const snapBadge = () => (els["snapshotLabel"] ? els["snapshotLabel"].textContent : "?");
+const dataTime = () => (els["dataTime"] ? els["dataTime"].textContent : "?");
 const noticeText = () => (els["notice"] ? els["notice"].innerHTML : "");
 /* ---- 浮层提示的读取辅助 ---- */
 const toastEls = () => (els["toastBox"] && els["toastBox"]._kids) ? els["toastBox"]._kids.slice() : [];
@@ -377,6 +384,28 @@ function runStatusCheck() {
   check("置灰时点击不发请求", countOf("/api/refresh") - beforeR, 0);
   check("也不弹任何提示", toastEls().length, 0);
 
+
+  section("12. 「取数时间」徽章必须报北京时间（2026-09-24 按用户要求改）");
+  /* 接口对同一时刻给了两个口径：fetchedAt（北京 UTC+8）/ fetchedAtEt（美东）。
+     页面取错哪一个**不会报错、格式也对**，只是时间差 12 小时 —— 属于最难看出来的那类错，
+     所以这里同时钉「显示的是哪个」和「标签写没写清时区」。 */
+  fetchedAtReply = "2026-09-23 10:15:26";
+  held = { basis: "night_live", sessionDate: "2026-09-23", inSession: true,
+           current: true, closeCst: "09月23日 16:00" };
+  runStatusCheck(); await tick();
+  check("显示北京时间（截到分钟）", dataTime(), "2026-09-23 10:15");
+  check("不是美东那个值", dataTime() === "2026-09-22 22:15", false);
+  check("不带 ET 后缀了", /ET/.test(dataTime()), false);
+  checkTrue("徽章标签写明是北京时间（不用让人猜）",
+    els["pageHeader"].innerHTML.indexOf("取数时间（北京时间）") >= 0, "标签未写明");
+
+  /* 还没有任何数据时（CACHE.fetched_at 为 0）接口给 null —— 要显示「—」而不是
+     "null" 或 "undefined 10:15"这种半截字符串。 */
+  fetchedAtReply = null;
+  held = { basis: "night_live", sessionDate: "2026-09-24", inSession: true,
+           current: true, closeCst: "09月24日 16:00" };
+  runStatusCheck(); await tick();
+  check("接口给 null 时显示「—」", dataTime(), "—");
 
   console.log(fail === 0 ? "\n全部通过 \u2713" : `\n${fail} 项未通过 \u2717`);
   process.exit(fail === 0 ? 0 : 1);

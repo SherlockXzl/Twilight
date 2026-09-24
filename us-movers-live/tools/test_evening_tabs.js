@@ -52,6 +52,7 @@ function mk(id) {
   return {
     id, innerHTML: "", textContent: "", value: "", hidden: false, style: {},
     classList: mkClassList(), _h: {}, _q: {},
+    dataset: {},            // modal.js 用它记「打开前的 overflow 原值」
     addEventListener(t, f) { this._h[t] = f; },
     setAttribute(k, v) { this["_a_" + k] = v; },
     getAttribute(k) { return this["_a_" + k]; },
@@ -115,7 +116,12 @@ global.document = {
     }
     return els[id] || (els[id] = mk(id));
   },
-  addEventListener() {}, title: ""
+  addEventListener() {}, title: "",
+  // ── 下面三项给 modal.js 用：第 16 节要真的把弹窗建起来（端到端），
+  //    而不是只断言"按钮渲染出来了"。
+  createElement: mk,
+  body: { style: {}, appendChild() {} },
+  activeElement: null
 };
 /* fetch 永不 resolve —— loadReasons 是"进页面取一次原因"，与标签交互无关，
    让它挂着可以避免异步回调在断言中途插进来改 DOM。 */
@@ -136,6 +142,12 @@ global.Shell = { state: {}, mount(o) { cap = o; }, syncCountdown() {} };
 
 eval(fs.readFileSync(ROOT + "static/util.js", "utf8"));
 eval(fs.readFileSync(ROOT + "static/combo.js", "utf8"));
+// evening.js 渲染「A 股映射」列时会调 ShareMap.button(...)，所以要一起加载。
+// 页面本身没问题（index.html 里有 <script src="sharemap.js">），
+// 是这类用例自己拼运行环境时容易漏 —— 漏了会报 ShareMap is not defined。
+eval(fs.readFileSync(ROOT + "static/sharemap.js", "utf8"));
+// modal.js 只在"点了按钮之后"才用到，但第 16 节要验证这条链路，所以也加载。
+eval(fs.readFileSync(ROOT + "static/modal.js", "utf8"));
 eval(fs.readFileSync(ROOT + "static/evening.js", "utf8"));
 
 /* ------------------------------------------------------------------ 构造数据 */
@@ -316,6 +328,119 @@ reload();
 BTN.mid_up.fire("click");
 check("夜盘的键已更新", stored(), "mid_up");
 check("早盘页的键没被动过", localStorage.getItem("morning.tab"), "stocks");
+
+/* 这一节钉的是**列真的渲染进了表格**。
+   组件层（按钮在两种数据下的长相、弹窗内容、Modal 的开关）在
+   tools/test_sharemap.js 里测；这里只回答一个问题：
+   evening.js 有没有把这一列接上、每行都给一个按钮。
+
+   fetch 桩永不 resolve（见文件顶部），所以 state.reasons 一直是空的 ——
+   这恰好是**真实的降级场景**：原因/映射拿不到时，列要照常出现、按钮要变灰，
+   而不是整列消失或按钮变禁用（禁用会让人不知道发生了什么）。 */
+section("15. A 股映射列：列头、按钮、以及拿不到分析时的降级");
+{
+  // ⚠️ 上一节结束时停在「小市值」档 —— 表格是**跟着标签走**的，
+  // 不先切回「所有」就会数到那一档的行数（第一次写这段时正是栽在这里：
+  // 期望 5 个按钮、实际 2 个）。用例之间共享同一份 DOM 状态，每节开头要自己摆正。
+  BTN.all.fire("click");
+
+  const html = els.tableHost.innerHTML;
+  const th = (html.match(/<th[^>]*>([^<]*)<\/th>/g) || [])
+    .map(s => s.replace(/<[^>]+>/g, ""));
+
+  check("表头列数", th.length, 9);
+  check("最后一列是「A 股映射」", th[th.length - 1], "A 股映射");
+  check("驱动原因列仍在它前面", th[th.length - 2], "驱动原因");
+
+  const btns = html.match(/<button[^>]*class="map-btn[^"]*"[^>]*>点击查看<\/button>/g) || [];
+  check("每行都有一个「点击查看」按钮", btns.length, BIG.length + MID.length);
+  check("按钮文案就是「点击查看」", btns.every(b => b.indexOf(">点击查看<") > 0), true);
+
+  // 拿不到 /api/reasons → 全部灰化，但仍然可点（不带 disabled）
+  check("拿不到分析时全部灰化", btns.every(b => b.indexOf("map-btn--none") > 0), true);
+  check("灰化的按钮**不禁用**（点了才有说明可看）",
+    btns.every(b => b.indexOf("disabled") < 0), true);
+
+  check("按钮带 data-sym（点击时据此取数）",
+    /data-sym="VICR"/.test(html), true);
+  check("按钮带 data-name（弹窗标题要用）",
+    /data-name="VICR Inc\."/.test(html), true);
+
+  // 切换标签后列不能丢 —— 表格是整块重建的，最容易在重绘时漏掉某一列
+  BTN.big_up.fire("click");
+  const h2 = els.tableHost.innerHTML;
+  check("切到单档后列仍在", (h2.match(/<th[^>]*>([^<]*)<\/th>/g) || []).length, 9);
+  check("切档后按钮数跟着行数走",
+    (h2.match(/class="map-btn/g) || []).length, BIG.length);
+
+  /* 这一列的样式约束（静态读 style.css，和 test_tab_styles.js 同样的做法）。
+     背景：全局 `tbody td` 是 `vertical-align:top` —— 那是给驱动原因列定的，
+     它是一整句话、能折三四行，顶对齐才整齐。但映射列只有一个按钮，
+     跟着顶对齐就会贴在某一行文本的高度上，看着像悬在半空。
+     用户 2026-09-24 专门提过一次，所以在这儿钉住：本列必须覆盖成居中。
+
+     最后一条是**配套断言**：它成立，上面那条覆盖才有意义。
+     如果哪天全局改成了 middle，这条会失败 —— 那不是误报，是提醒你
+     回来把本列的覆盖和这条断言一起删掉，别留下一处没用的重复声明。 */
+  const css = fs.readFileSync(ROOT + "static/style.css", "utf8");
+  const mapRule = css.match(/th\.map,\s*td\.map\s*\{([^}]*)\}/);
+  check("style.css 里有 th.map,td.map 规则", !!mapRule, true);
+  check("映射列垂直居中（覆盖全局的 top）",
+    !!mapRule && /vertical-align:\s*middle/.test(mapRule[1]), true);
+  check("映射列保持水平居中",
+    !!mapRule && /text-align:\s*center/.test(mapRule[1]), true);
+  check("全局 tbody td 仍是 top（本列覆盖的前提，改了要一并看注释）",
+    /tbody td\s*\{[^}]*vertical-align:\s*top/.test(css), true);
+
+  /* 同样钉一条弹窗内容相关的规则：`.sm-m:last-child` 原本是给每只票末尾的
+     「风险」降色的。2026-09-24 去掉个股风险行之后，卡片底部只剩「证据」，
+     这条规则会**转而把证据也调淡**（:last-child 不看内容）—— 是个隐蔽的连带影响，
+     所以规则本身已删。注释里提到它是允许的，检查前先剥掉注释。 */
+  const cssNoComment = css.replace(/\/\*[\s\S]*?\*\//g, "");
+  check("已删除 .sm-m:last-child（否则会把「证据」也调淡）",
+    cssNoComment.indexOf(".sm-m:last-child") < 0, true);
+}
+
+/* 主链路的端到端：事件委托 → openMap → Modal + ShareMap。
+   三个组件各自的行为在前面（tools/test_sharemap.js）测过，这一节只回答
+   「它们有没有真的接上」—— 委托挂在哪个宿主、取的是哪两个属性、
+   弹窗标题用的是不是行里的公司名，这些接错了页面不会报错，只会点了没反应。 */
+section("16. 点击「点击查看」→ 弹窗打开（主链路端到端）");
+{
+  BTN.all.fire("click");     // 上一节停在「大市值」，先回到全量
+
+  // 模拟一次真实冒泡：事件的 target 是行内那个按钮
+  function fakeBtn(sym, name) {
+    return {
+      _a: { "data-sym": sym, "data-name": name },
+      getAttribute(k) { return this._a[k]; },
+      closest(sel) { return sel === ".map-btn" ? this : null; }
+    };
+  }
+
+  const title = () => Modal.node().querySelector(".modal-title").textContent;
+  const body = () => Modal.node().querySelector(".modal-bd").innerHTML;
+
+  els.tableHost.fire("click", { target: fakeBtn("VICR", "VICR Inc.") });
+  check("弹窗打开", Modal.isOpen(), true);
+  check("标题 = 公司名（代码） · A 股映射", title(), "VICR Inc.（VICR） · A 股映射");
+  check("副标题标出「尚未生成」",
+    Modal.node().querySelector(".modal-sub").textContent, "尚未生成");
+  check("正文是「还没有分析」的说明（不是空白弹窗）",
+    /还没有 A 股映射分析/.test(body()), true);
+  Modal.close();
+
+  // 点表格的空白处（target 没有 .map-btn 祖先）不该弹窗
+  els.tableHost.fire("click", { target: { closest: () => null } });
+  check("点非按钮区域不弹窗", Modal.isOpen(), false);
+
+  // 关掉之后再点还能开 —— 确认委托没被这次重建弄丢
+  els.tableHost.fire("click", { target: fakeBtn("SOFI", "SOFI Inc.") });
+  check("再次点击仍能打开", Modal.isOpen(), true);
+  check("标题换成了新点的那只", title(), "SOFI Inc.（SOFI） · A 股映射");
+  Modal.close();
+  check("关闭后状态回到未打开", Modal.isOpen(), false);
+}
 
 console.log(fail === 0 ? "\n全部通过 ✓" : `\n${fail} 项未通过 ✗`);
 process.exit(fail === 0 ? 0 : 1);

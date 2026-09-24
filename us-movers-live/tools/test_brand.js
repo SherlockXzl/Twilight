@@ -1,29 +1,36 @@
 #!/usr/bin/env node
 /**
- * 站点标（左上角 logo + 「晨昏线」三字）用例。
+ * 站点标用例（左上角 brand.png 完整标识 + favicon logo.png）。
  *
  * 用法：node tools/test_brand.js      （退出码 0 = 全通过）
  *
  * 为什么需要这个用例
  * ------------------
  * 这一块**怎么改都不会报错**，正是本项目反复栽跟头的那类改动：
- *   · 图挂了 / 名字写错 → 页面上是个破图占位符，但布局照样跑、控制台不一定报错；
- *   · 字色被改成浅色（哪怕只是"顺手调亮点"）→ 白侧栏上的字**直接看不见**，
- *     页面照常渲染、控制台一声不响。本体裁就真做过一次白字，所以颜色是**算对比度**的；
- *   · 回退只做一半 —— 只改了 HTML 没删 CSS，留下一堆不生效的死样式，
- *     下次有人翻到会以为还是现行约定。
+ *   · 图挂了 / 文件名写错 → 页面上是个破图占位符，但布局照样跑、控制台不一定报错；
+ *   · 图是好的但**偏白** → 白侧栏上等于隐形，页面照常渲染、控制台一声不响
+ *     （文字版时代本项目真做过一次白字「线」，所以可见性是**算出来的**，不靠肉眼）；
+ *   · 图是"原图直接缩" → 四周带一圈透明留白，标识在页面上莫名小一圈、和导航对不齐；
+ *   · 换成整图后只删了一半 → HTML 不再有站名文字，CSS 里却留着 `.brand-mark`
+ *     的死样式，下次有人翻到会以为还是现行约定。
  *
  * 所以这里钉四件事：
- *   1. **资产本身**是好的 —— 文件在、是真 PNG、带透明通道、分辨率够 retina 用，
- *      而且**内容铺满画布**（解像素量包围盒，专挡「原图直接缩」留下的空白）；
- *   2. **渲染出来的结构**对 —— img 有 src/alt/宽高，站点名是一整段纯文字没被拆散；
- *   3. **颜色对比度达标** —— 从 CSS 里读出实际色值算，字色压在白侧栏上必须 ≥ 4.5:1；
- *   4. **没有残留** —— 不复存在的分色 / 描边样式与变量都清干净了，不留死样式。
+ *   1. **资产本身**是好的 —— 文件在、是真 PNG、带 alpha、无隔行、分辨率够 retina，
+ *      而且**内容铺满画布**（解像素算包围盒，专挡"原图直接缩"留下的空白）；
+ *   2. **可见性** —— 解出像素算 WCAG 对比度：放在白侧栏上的图，不能大面积偏白；
+ *   3. **渲染出来的结构**对 —— img 有 class/src/alt/宽高，且宽高比与实际图片一致；
+ *   4. **没有残留** —— 换成整图后不再存在的文字类（`.brand-mark` / `.brand-sub` /
+ *      `.brand-tx`）与历史分色类都清干净了，不留死样式。
+ *
+ * 2026-09-24：站点标从「小图 + 纯文字站名 + 副标题」换成用户给的**完整标识图**
+ * （圆形徽标 + 「晨昏线」三字一体）。本用例随之改写：原来的「站点名用正文色、对白侧栏
+ * ≥4.5:1」那组断言随文字一起作废，替换成**直接量图本身的对比度** —— 风险没消失，
+ * 只是从"CSS 里挑了浅色"变成了"图本身偏白"。
  */
 
 const fs = require("fs");
 const path = require("path");
-const zlib = require("zlib");   // 用来解 PNG 像素，见下面的 pngAlphaBBox
+const zlib = require("zlib");   // 用来解 PNG 像素
 
 const ROOT = path.resolve(__dirname, "..") + "/";
 const read = p => fs.readFileSync(ROOT + p, "utf8");
@@ -42,25 +49,20 @@ function section(t) { console.log("\n" + t); }
 
 /* --------------------------------------------- 0. 显示尺寸 → 需要的分辨率 */
 
-/** logo 在正常宽度下的显示边长（px），必须和 style.css 的 .brand-logo 一致 */
-const LOGO_DISPLAY = 38;
+/** 侧栏标识在正常宽度下的显示宽（px），必须和 style.css 的 .brand-img 一致 */
+const BRAND_DISPLAY_W = 180;
+/** favicon 的显示边长按 16px 算（浏览器标签页），留 2 倍余量即可 */
+const FAVICON_DISPLAY = 16;
 
-/* ------------------------------------------------------------ 1. 资产 */
+/* ------------------------------------------------------------ PNG 解码 */
 
-section("1. logo 资产：文件在、是真 PNG、带透明通道、分辨率够用");
-
-const LOGO_PATH = ROOT + "static/logo.png";
-const logoOk = fs.existsSync(LOGO_PATH);
-checkTrue("static/logo.png 存在", logoOk, logoOk ? "" : "文件缺失 —— 页面上会是个破图");
-
-/** 解出 PNG 的**内容包围盒**（alpha > 12 的范围）。
+/** 解出 8bit RGBA 像素。只处理无隔行的 colorType 6（本项目的两张图都是）。
  *
- *  为什么要真的解码，而不是只看文件头那几个字节：
- *  最阴的一种改法是"把设计师给的原图直接缩放塞进来"。图是好的、透明底也在、
- *  尺寸也够 retina —— 唯独**四周留了一整圈空白**，于是 logo 在页面上看起来
- *  莫名其妙地小一圈，还和文字对不齐。文件头一个字都看不出这件事，
- *  只有量出"内容占画布多少"才知道。Node 自带 zlib，解 PNG 也就二十行。 */
-function pngAlphaBBox(buf) {
+ *  为什么要真的解码而不是只看文件头：
+ *  最阴的改法是"把设计师给的原图直接缩放塞进来" —— 图是好的、透明底也在、尺寸也够，
+ *  唯独**四周留了一整圈空白**，于是标识在页面上看起来莫名其妙地小一圈。
+ *  文件头一个字都看不出这件事，只有量出"内容占多大"才知道。Node 自带 zlib，够用。 */
+function decodePng(buf) {
   let off = 8, ihdr = null; const idat = [];
   while (off + 8 <= buf.length) {
     const len = buf.readUInt32BE(off);
@@ -96,6 +98,12 @@ function pngAlphaBBox(buf) {
       cur[i] = v;
     }
   }
+  return { w, h, bpp, stride, px };
+}
+
+/** alph 阈值以上的像素 → 包围盒 + 角落 alpha */
+function alphaBBox(d) {
+  const { w, h, bpp, stride, px } = d;
   let x0 = w, y0 = h, x1 = -1, y1 = -1;
   for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
     if (px[y * stride + x * bpp + 3] > 12) {
@@ -106,50 +114,101 @@ function pngAlphaBBox(buf) {
   return x1 < 0 ? null : { w, h, x0, y0, x1, y1, cornerA: px[3] };
 }
 
-let w = 0, h = 0, colorType = -1, bitDepth = -1;
-if (logoOk) {
-  const buf = fs.readFileSync(LOGO_PATH);
-  const magic = buf.slice(0, 8).toString("hex");
-  check("PNG 文件头", magic, "89504e470d0a1a0a");
+/** WCAG 相对亮度 */
+function lum(r, g, b) {
+  const ch = [r, g, b].map(v => v / 255)
+    .map(v => (v <= 0.04045 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4)));
+  return 0.2126 * ch[0] + 0.7152 * ch[1] + 0.0722 * ch[2];
+}
+
+/** 不透明像素里，对**白底**对比度 ≥ thr 的占比。
+ *
+ *  这是本用例的核心价值：站点标贴在白侧栏上，唯一会"静默失败"的方向就是
+ *  图本身偏白（浅到看不见）。假想不是空穴来风 —— 文字版时代真做过一次白字，没有
+ *  描边时在白底上完全隐形，而页面照常渲染、控制台一声不响。 */
+function contrastVsWhite(d, thr) {
+  const { w, h, bpp, stride, px } = d;
+  let opaque = 0, ok = 0;
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+    const i = y * stride + x * bpp;
+    if (px[i + 3] <= 12) continue;
+    opaque++;
+    const L = lum(px[i], px[i + 1], px[i + 2]);
+    if (1.05 / (L + 0.05) >= thr) ok++;
+  }
+  return opaque ? ok / opaque : 0;
+}
+
+/* ------------------------------------------------------------ 1. 资产 */
+
+/** 通用的 PNG 资产检查。img 侧栏标与 favicon 走同一套，只有尺寸期望不同。 */
+function checkAsset(label, relPath, opts) {
+  console.log("\n  —— " + label + "（" + relPath + "）——");
+  const full = ROOT + relPath;
+  if (!fs.existsSync(full)) {
+    checkTrue(relPath + " 存在", false, "文件缺失 —— 页面上会是个破图");
+    return null;
+  }
+  checkTrue(relPath + " 存在", true);
+  const buf = fs.readFileSync(full);
+  check("PNG 文件头", buf.slice(0, 8).toString("hex"), "89504e470d0a1a0a");
   check("IHDR 块名", buf.slice(12, 16).toString("ascii"), "IHDR");
-  w = buf.readUInt32BE(16);
-  h = buf.readUInt32BE(20);
-  bitDepth = buf[24];
-  colorType = buf[25];          // 6 = RGBA，4 = 灰度+alpha
-  const interlace = buf[28];    // 解码器只处理 0（无隔行）
+  const w = buf.readUInt32BE(16), h = buf.readUInt32BE(20);
+  const bitDepth = buf[24], colorType = buf[25], interlace = buf[28];
   checkTrue("带 alpha 通道（colorType 6/4）", colorType === 6 || colorType === 4,
     "colorType=" + colorType);
   checkTrue("位深 8", bitDepth === 8, "bitDepth=" + bitDepth);
   checkTrue("无隔行（解码器前提）", interlace === 0, "interlace=" + interlace);
-  checkTrue("是正方形", w === h, w + "x" + h);
-  checkTrue("分辨率够 retina（≥ 显示尺寸的 2 倍）", w >= LOGO_DISPLAY * 2,
-    w + "px ≥ " + (LOGO_DISPLAY * 2) + "px");
+  checkTrue("宽 ≥ 显示宽 ×2（retina 够用）", w >= opts.dispW * 2,
+    w + "px ≥ " + (opts.dispW * 2) + "px");
+  if (opts.square) {
+    checkTrue("是正方形（favicon 画布）", w === h, w + "x" + h);
+  } else {
+    checkTrue("是横向标识（不是正方形）", w > h, w + "x" + h);
+    checkTrue("宽高比 = " + opts.ratioNote, Math.abs(w / h - opts.ratio) < 0.05,
+      (w / h).toFixed(3) + " vs " + opts.ratio);
+  }
   const kb = Math.round(buf.length / 1024);
-  checkTrue("体积合理（< 120KB）", kb < 120, kb + "KB");
+  checkTrue("体积合理（< 200KB）", kb < 200, kb + "KB");
 
-  const bb = colorType === 6 ? pngAlphaBBox(buf) : null;
+  const d = colorType === 6 ? decodePng(buf) : null;
+  const bb = d ? alphaBBox(d) : null;
   checkTrue("解出了内容包围盒", !!bb, bb ? JSON.stringify(bb) : "解码失败");
   if (bb) {
-    /* 站点标背景是**白色侧栏**，图必须透明底 —— 白底图将来换主题/贴到有色底上
-       会露出一块白方块，且和文字基线对不齐。这里直接读像素，不靠"声明了 alpha"。 */
     check("左上角是透明的（不是白底图）", bb.cornerA, 0);
     const fx = (bb.x1 - bb.x0 + 1) / bb.w, fy = (bb.y1 - bb.y0 + 1) / bb.h;
-    /* 内容要铺满画布：这一条专门挡"原图直接缩放"—— 那种图四周留一大圈空白，
-       logo 在页面上会莫名其妙地小一圈。实测裁边版两轴都 ≥ 92%。 */
-    checkTrue("内容横向铺满画布 ≥ 88%（挡住「原图直接缩」留下的空白）", fx >= 0.88,
+    /* 内容要铺满画布：专挡"原图直接缩"—— 那种图四周留一大圈空白。
+       实测两张都是 100%。 */
+    checkTrue("内容横向铺满画布 ≥ 92%（挡住「原图直接缩」留下的空白）", fx >= 0.92,
       (fx * 100).toFixed(1) + "%");
-    checkTrue("内容纵向铺满画布 ≥ 88%", fy >= 0.88, (fy * 100).toFixed(1) + "%");
-    /* 四周留白要大致均匀，否则贴着文字的边会看着"偏" */
+    checkTrue("内容纵向铺满画布 ≥ 92%", fy >= 0.92, (fy * 100).toFixed(1) + "%");
     const mx = (bb.w - (bb.x1 - bb.x0 + 1)) / 2, my = (bb.h - (bb.y1 - bb.y0 + 1)) / 2;
     checkTrue("内容基本居中（上下/左右留白相差 < 4% 画布）",
       Math.abs(bb.x0 - mx) / bb.w < 0.04 && Math.abs(bb.y0 - my) / bb.h < 0.04,
       "左 " + bb.x0 + " / 右 " + (bb.w - 1 - bb.x1) + " · 上 " + bb.y0 + " / 下 " + (bb.h - 1 - bb.y1));
   }
+
+  /* 可见性：站点标贴在**白侧栏**上。图里至少要有相当一部分墨色（对白底 ≥3:1），
+     否则就是"白底上的白图"—— 页面照常渲染，什么错都不报。
+     实测 brand.png 53.1% / logo.png 50.6%，门槛留到 40% 以免对配色过敏感。 */
+  if (d) {
+    const f3 = contrastVsWhite(d, 3.0);
+    checkTrue("不透明像素里 ≥40% 对白底达 3:1（否则在白侧栏上等于隐形）", f3 >= 0.40,
+      (f3 * 100).toFixed(1) + "%");
+  }
+  return { w, h };
 }
+
+section("1. 标识资产：真 PNG / 带 alpha / 内容铺满 / 在白底上看得见");
+
+const brandSize = checkAsset("侧栏站点标", "static/brand.png",
+  { dispW: BRAND_DISPLAY_W, square: false, ratio: 180 / 87, ratioNote: "shell.js 里 width/height 声明的 180:87" });
+const favSize = checkAsset("站点图标", "static/logo.png",
+  { dispW: FAVICON_DISPLAY, square: true });
 
 /* ------------------------------------------------------ 2. 渲染出的结构 */
 
-section("2. 侧栏渲染：img 挂在左侧，站点名是一整段纯文字");
+section("2. 侧栏渲染：一张整图，不再有站名 / 副标题文字");
 
 /* DOM 桩：字段齐全一点，因为 shell.js 的 mount() 会顺路调页头、状态检查等，
    只要有一个元素 stub 少方法就会中途抛错、renderSidebar 的产物看不到。 */
@@ -194,55 +253,42 @@ const img = sidebar.match(/<img\b[^>]*>/);
 checkTrue("有 <img>", !!img, img ? img[0] : "找不到");
 if (img) {
   /* 用 <img> 而不是 CSS 背景图：背景图打印/另存不会跟着走，这是全站唯一品牌资产。 */
-  checkTrue("带 brand-logo 类", /class="brand-logo"/.test(img[0]), img[0]);
-  checkTrue("src 指向 logo.png", /src="logo\.png"/.test(img[0]), img[0]);
+  checkTrue("带 brand-img 类", /class="brand-img"/.test(img[0]), img[0]);
+  checkTrue("src 指向 brand.png", /src="brand\.png"/.test(img[0]), img[0]);
   /* alt 不能空：图挂了时至少要说出这是什么，而不是一片空白 */
   checkTrue("alt 非空", /alt="[^"]+"/.test(img[0]), img[0]);
   /* 宽高写在标签属性上（不只是 CSS）—— 图未解码完时侧栏不会先塌再跳 */
-  checkTrue("有 width/height 属性（防布局跳动）",
-    /\bwidth="\d+"/.test(img[0]) && /\bheight="\d+"/.test(img[0]), img[0]);
+  const mw = img[0].match(/\bwidth="(\d+)"/), mh = img[0].match(/\bheight="(\d+)"/);
+  checkTrue("有 width/height 属性（防布局跳动）", !!mw && !!mh, img[0]);
+  /* 声明的宽高比必须与实际图片一致，否则浏览器会把图**拉伸变形**
+     （只在 CSS 给了固定宽或高时才会暴露，肉眼要盯着看才发现） */
+  if (mw && mh && brandSize) {
+    const declared = Number(mw[1]) / Number(mh[1]);
+    const actual = brandSize.w / brandSize.h;
+    checkTrue("声明的宽高比 = 图片实际宽高比（防拉伸变形）",
+      Math.abs(declared - actual) < 0.02,
+      declared.toFixed(3) + " vs " + actual.toFixed(3));
+  }
 }
-checkTrue("img 在文字之前（logo 在左）",
-  sidebar.indexOf("<img") < sidebar.indexOf("brand-mark"), "位置正确");
 
-const mark = sidebar.match(/<div class="brand-mark">([\s\S]*?)<\/div>/);
-checkTrue("有 brand-mark", !!mark, mark ? mark[1] : "找不到");
-if (mark) {
-  const inner = mark[1];
-  /* 站点名是**一整段纯文字**（2026-09-22 从"三字三种处理"改回常规）。
-     这条同时挡两件事：
-       ① 有 span/别的标签混进来（比如又按字位拆成分色）；
-       ② 名字本身掉了字或带上了多余空白。 */
-  check("站点名是纯文字、一整段", inner, "晨昏线");
-  checkTrue("没有按字位拆成多个 span（拆了就得靠「名字正好 3 字」这个隐含前提）",
-    inner.indexOf("<") < 0, inner.indexOf("<") < 0 ? "无标签" : "出现了标签：" + inner);
-}
-checkTrue("副标题仍在", sidebar.indexOf("brand-sub") >= 0);
+/* 换成整图后，站名与副标题都在图里了。HTML 里再冒出文字节点，就是"图 + 重复文字"。 */
+section("3. 站名/副标题必须只存在于图里（HTML 里不该再有第二份）");
+/* 只看**属性形态**，不看注释 —— shell.js 的注释里正当地提到了这些已删除的类名。 */
+["brand-mark", "brand-sub", "brand-tx"].forEach(function (cls) {
+  checkTrue("侧栏 HTML 里不再有 " + cls, sidebar.indexOf('class="' + cls) < 0,
+    sidebar.indexOf('class="' + cls) < 0 ? "已清" : "又出现了");
+});
+checkTrue("侧栏里没有裸的中文站名文本节点（重复）",
+  !/<div class="brand">[\s\S]*?[\u4e00-\u9fa5]+[\s\S]*?<\/div>/.test(sidebar.replace(/alt="[^"]*"/g, "")),
+  "已清");
 
-/* ------------------------------------------------------------ 3. 颜色 */
+/* ------------------------------------------------------ 4. 样式 */
 
-section("3. 站点名用常规正文色，且必须够黑（白底上不能隐形）");
+section("4. 样式：.brand-img 与窄屏覆盖");
 
 const css = read("static/style.css");
 
-function cssVar(name) {
-  const m = css.match(new RegExp("--" + name + "\\s*:\\s*(#[0-9a-fA-F]{3,8})\\s*;"));
-  return m ? m[1].toLowerCase() : null;
-}
-/** WCAG 相对亮度 / 对比度 */
-function lum(hex) {
-  const h = hex.replace("#", "");
-  const full = h.length === 3 ? h.split("").map(c => c + c).join("") : h;
-  const ch = [0, 2, 4].map(i => parseInt(full.slice(i, i + 2), 16) / 255)
-    .map(v => (v <= 0.04045 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4)));
-  return 0.2126 * ch[0] + 0.7152 * ch[1] + 0.0722 * ch[2];
-}
-function contrast(a, b) {
-  const l1 = lum(a), l2 = lum(b);
-  return (Math.max(l1, l2) + 0.05) / (Math.min(l1, l2) + 0.05);
-}
-
-/** 取某选择器的规则体（同 test_tab_styles.js 的做法） */
+/** 取某选择器的规则体 */
 function ruleBody(selector) {
   const re = new RegExp("(?:^|[,{])\\s*" + selector.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "\\s*(?:,[^{]*)?\\{([^}]*)\\}", "m");
   const m = css.match(re);
@@ -253,39 +299,35 @@ function prop(body, name) {
   const m = body.match(new RegExp("(?:^|;)\\s*" + name + "\\s*:([^;]+)"));
   return m ? m[1].trim() : null;
 }
-
-const MARK = ruleBody(".brand-mark");
-checkTrue(".brand-mark 有规则块", !!MARK, MARK ? "OK" : "缺失");
-
-check("字号挂全站变量（不写裸 px）", prop(MARK, "font-size"), "var(--fs-6)");
-check("字重回到常规的 600", String(prop(MARK, "font-weight")), "600");
-check("字距 1.5px", String(prop(MARK, "letter-spacing")), "1.5px");
-check("颜色用全站正文色 --ink", prop(MARK, "color"), "var(--ink)");
-
-/* 站点名压在**白侧栏**上，这里唯一会"静默失败"的方向就是字色太浅（浅到看不见）。
-   不是假想 —— 本轮就真做过一次白字「线」，没有描边时在白底上完全隐形。
-   所以颜色不能只查"写没写"，要算出来。 */
-const INK = cssVar("ink");
-checkTrue("--ink 解析得到", !!INK, String(INK));
-if (INK) {
-  const crInk = contrast(INK, "#ffffff");
-  checkTrue("正文色对白侧栏 ≥ 4.5:1（浅色字会静默隐形）", crInk >= 4.5,
-    INK + " = " + crInk.toFixed(2) + ":1");
+function cssVar(name) {
+  const m = css.match(new RegExp("--" + name + "\\s*:\\s*(#[0-9a-fA-F]{3,8})\\s*;"));
+  return m ? m[1].toLowerCase() : null;
 }
 
-/* 不写 font-family = 继承 body 的系统字体栈，这就是"正常的字体"。
-   写成某个字体名（宋体之类）反而会变成特例。 */
-checkTrue("不单独指定字体（继承 body 的系统栈 = 正常字体）",
-  prop(MARK, "font-family") === null, String(prop(MARK, "font-family")));
+const IMG_RULE = ruleBody(".brand-img");
+checkTrue(".brand-img 有规则块", !!IMG_RULE, IMG_RULE ? "OK" : "缺失");
+if (IMG_RULE) {
+  check("display:block（去掉行内基线的额外行高）", prop(IMG_RULE, "display"), "block");
+  check("height:auto（按图片自身比例，不硬拉）", prop(IMG_RULE, "height"), "auto");
+  check("max-width 与断言里的显示宽一致", prop(IMG_RULE, "max-width"), BRAND_DISPLAY_W + "px");
+}
 
-/* ------------------------------- 4. 分色 / 描边的残留要清干净 */
+const narrow = css.slice(css.indexOf("@media(max-width:760px)"));
+checkTrue("窄屏媒体查询里覆盖了 .brand-img 宽度（顶部横条高度有限）",
+  /\.brand-img\s*\{[^}]*width/.test(narrow), "找到覆盖规则");
+checkTrue("窄屏 .brand 去掉了内边距",
+  /\.brand\s*\{[^}]*padding\s*:\s*0/.test(narrow), "找到覆盖规则");
 
-section("4. 三个分色类是历史产物，改回常规后必须清干净（半途回退最丑）");
+/* ------------------------------- 5. 换整图后的残留要清干净 */
 
-/* 曾经有 .bd（晨金）/ .bn（昏蓝）/ .bo（线 白底黑描边）三个按字位分色的类。
-   回退后它们都该消失 —— 留着就是死样式：不生效，但下次有人翻到会以为还有用，
-   或者只删了 HTML 没删 CSS，日后被当成"现行约定"照抄。 */
-[".brand-mark .bd", ".brand-mark .bn", ".brand-mark .bo"].forEach(function (sel) {
+section("5. 文字版留下的类与历史分色类都必须清干净（半途回退最丑）");
+
+/* 曾经有 .brand-logo / .brand-mark / .brand-sub（小图 + 站名 + 副标题的 lockup），
+   更早还有 .bd / .bn / .bo 三个按字位分色的类。换整图后这些都该消失 ——
+   留着就是死样式：不生效，但下次有人翻到会以为还有用。
+   注意 ruleBody 只认 `selector {` 形态，注释里提到的类名不会误报。 */
+[".brand-logo", ".brand-mark", ".brand-sub", ".brand-tx",
+ ".brand-mark .bd", ".brand-mark .bn", ".brand-mark .bo"].forEach(function (sel) {
   const r = ruleBody(sel);
   checkTrue("CSS 里不再有 " + sel + " 规则", r === null, r === null ? "已清" : "残留：" + r);
 });
@@ -293,26 +335,6 @@ checkTrue("--brand-dawn 变量已移除", cssVar("brand-dawn") === null, String(
 checkTrue("--brand-night 变量已移除", cssVar("brand-night") === null, String(cssVar("brand-night")));
 checkTrue("白字用的 @supports 兜底描边块也一并移除（没有白字了）",
   css.indexOf("@supports not (-webkit-text-stroke") < 0, "已清");
-
-/* ------------------------------------------------------ 5. 尺寸与窄屏 */
-
-section("5. 尺寸：常态 38px、窄屏收小（不是漏配）");
-
-const LOGO_RULE = ruleBody(".brand-logo");
-checkTrue(".brand-logo 有规则块", !!LOGO_RULE, LOGO_RULE ? "OK" : "缺失");
-check("常态宽度与断言里的假设一致", prop(LOGO_RULE, "width"), LOGO_DISPLAY + "px");
-check("常态高度", prop(LOGO_RULE, "height"), LOGO_DISPLAY + "px");
-checkTrue("flex:0 0 auto（不被长文字挤扁）", /0 0 auto/.test(String(prop(LOGO_RULE, "flex"))),
-  String(prop(LOGO_RULE, "flex")));
-
-/* 窄屏：顶部横条里 logo 要收小，否则整条被撑高 */
-const narrow = css.slice(css.indexOf("@media(max-width:760px)"));
-checkTrue("窄屏媒体查询里覆盖了 .brand-logo 尺寸",
-  /\.brand-logo\s*\{[^}]*width/.test(narrow), "找到覆盖规则");
-checkTrue("窄屏里也覆盖了 .brand-mark 字号（收小到 18px）",
-  /\.brand-mark\s*\{[^}]*font-size/.test(narrow), "找到覆盖规则");
-checkTrue("窄屏副标题让位（display:none）",
-  /\.brand-sub\s*\{[^}]*display\s*:\s*none/.test(narrow), "找到覆盖规则");
 
 console.log("");
 if (fail === 0) { console.log("全部通过 \u2713  (" + pass + " 项断言)"); process.exit(0); }

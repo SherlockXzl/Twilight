@@ -47,6 +47,11 @@
 <script src="util.js"></script>
 <script src="icons.js"></script>
 <script src="combo.js"></script>
+<script src="modal.js"></script>
+<!-- sharemap.js：把「A 股映射」的数据渲染成弹窗内容。
+     与 evening.js 分开是因为它是纯函数（数据 → HTML 字符串），可以单独跑单测；
+     内容结构又长，塞进页面脚本会把分档/筛选那部分逻辑淹掉。 -->
+<script src="sharemap.js"></script>
 <script src="shell.js"></script>
 <script src="evening.js"></script>
 </body>

@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>明暗对照</title>
+<!-- 站点图标：与另两页同一张 logo.png，见 shell.js 的说明。 -->
+<link rel="icon" type="image/png" href="logo.png">
+<link rel="apple-touch-icon" href="logo.png">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="app">
+
+  <aside class="sidebar" id="sidebar"></aside>
+
+  <main class="main">
+    <header class="top" id="pageHeader"></header>
+
+    <div class="panel" id="notice" style="display:none"></div>
+
+    <!-- toolbar 与「夜盘异动」页是同一套控件（见 evening.js 的 renderFilters）：
+         搜索框 + 板块下拉 + 行业下拉 + 条数提示。
+         这里**没有分档标签页** —— 全市场目录不做涨跌分档，那是行情页的事；
+         也没有「口径说明」行，因为这张表没有市值门槛之类的筛选规则。 -->
+    <div class="toolbar">
+      <input type="search" id="q" placeholder="搜索代码 / 公司 / 板块 / 行业…">
+      <div id="sectorSel" class="combo"></div>
+      <div id="industrySel" class="combo"></div>
+      <span class="hint" id="rowInfo"></span>
+    </div>
+
+    <div id="tableHost"><div class="empty">加载中…</div></div>
+
+    <!-- 分页条：由 linkage.js 的 renderPager() 填充；只有一页时它会把这里清空 -->
+    <div class="pager" id="pager"></div>
+  </main>
+
+</div>
+<script src="util.js"></script>
+<script src="icons.js"></script>
+<script src="combo.js"></script>
+<script src="shell.js"></script>
+<script src="linkage.js"></script>
+</body>
+</html>

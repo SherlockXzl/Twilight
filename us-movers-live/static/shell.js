@@ -29,9 +29,11 @@
   //: icon  取 Icons 里的键名（见 icons.js）。
   //: accent 可选，覆盖「选中时」的图标颜色；不写则跟菜单项文字一样是站点蓝。
   //:        太阳与月亮都取用户给定图选中态的亮绿 #75c82b（两张图本来就是同色）。
+  //:        「明暗对照」用 taiji（太极）—— 明与暗同体、互为表里，正合「对照」二字。
   var NAV = [
-    { key: "morning", label: "早盘总结", href: "/morning", icon: "sun",  accent: "#75c82b" },
-    { key: "evening", label: "夜盘异动", href: "/",        icon: "moon", accent: "#75c82b" }
+    { key: "morning", label: "早盘总结", href: "/morning", icon: "sun",   accent: "#75c82b" },
+    { key: "evening", label: "夜盘异动", href: "/",        icon: "moon",  accent: "#75c82b" },
+    { key: "linkage", label: "明暗对照", href: "/linkage", icon: "taiji", accent: "#75c82b" }
   ];
 
   /* 2026-09-22 起：**夜盘页不再自动更新数据**（按用户要求）。
@@ -123,12 +125,20 @@
         badges = DOT_BADGE +
           '<span class="badge">复盘交易日 <b id="tradeDate">—</b></span>' +
           '<span class="badge">生成时间 <b id="genTime">—</b></span>';
+      } else if (mode === "catalog") {
+        // 「明暗对照」用的模式：这一页展示的是一份**静态清单**（全市场美股目录），
+        // 不是行情快照 —— 所以既没有「取数时间」也没有「立即刷新」：
+        // 清单十天半月才重建一次，摆一个刷新按钮只会让人以为数据在动。
+        // 只报两件事：收录了多少只、这份目录是什么时候建的。
+        badges = DOT_BADGE +
+          '<span class="badge">收录 <b id="catCount">—</b></span>' +
+          '<span class="badge">目录更新 <b id="catTime">—</b></span>';
       } else {
       badges = DOT_BADGE +
         // 「数据」= 这份快照代表哪个交易日的什么口径（收盘 / 盘中）。**没有倒计时** ——
         // 页面本来就不再自动更新了，显示"下次刷新"只会误导。
         '<span class="badge">数据 <b id="snapshotLabel">—</b></span>' +
-        '<span class="badge">取数时间 <b id="dataTime">—</b></span>' +
+        '<span class="badge">取数时间（北京时间） <b id="dataTime">—</b></span>' +
         '<button id="btnRefresh" class="primary">立即刷新</button>';
     }
     host.innerHTML =
@@ -438,12 +448,22 @@
         state.inSession = s2.inSession;
         paintRefreshBtn(s2.inSession);
         renderSnapshotBadge(meta);
-        /* 取数时间：接口给的 fetchedAtEt 就是「这份数据对应的美东时刻」。
-           原本这个徽章一直显示「—」—— 声明了 <b id="dataTime"> 却没人赋值，
-           看着像坏了；这里补上（只取到分钟，秒级对看盘没意义）。 */
+        /* 取数时间：接口对同一个时刻给了两个口径 ——
+             meta.fetchedAt    —— 北京时间（UTC+8）
+             meta.fetchedAtEt  —— 美东时间（夜盘那套口径）
+           2026-09-24 按用户要求改用**北京时间**：读这一页的人、跑这份服务的机器、
+           以及下一次刷新，都在北京；写着美东还得让人自己换算，而"这份数据是什么
+           时候拉的"本来就该按读者的钟报时。美东口径仍留在接口里（排障要用），
+           只是不再上页面。
+
+           ⚠️ 只做**字符串截断**，不要 new Date() 再格式化：这两个字段都是
+           "YYYY-MM-DD HH:MM:SS" 这种**不带时区标记**的字符串，JS 会按浏览器本地时区
+           去解析它 —— 在非北京时区的机器上会整体偏移几小时，而错的时间戳看起来
+           完全正常（没有报错、格式也对），是最难发现的那类错。
+           截到分钟即可，秒级对看盘没意义。 */
         var dt = $("dataTime");
-        if (dt) dt.textContent = meta.fetchedAtEt
-          ? String(meta.fetchedAtEt).slice(0, 16) + " ET" : "—";
+        if (dt) dt.textContent = meta.fetchedAt
+          ? String(meta.fetchedAt).slice(0, 16) : "—";
         renderNotice(meta);
         if (state.onData) state.onData(res.body);
         if (!res.ok) showError(res.body.message || "数据尚未就绪");
@@ -505,7 +525,10 @@
 
   function mount(opts) {
     opts = opts || {};
-    state.mode = opts.mode === "daily" ? "daily" : "live";
+    // 三种模式：live（夜盘异动，跟着快照取数）/ daily（早盘总结，读一份晨报）/
+    // catalog（明暗对照，展示一份静态目录，取数由页面自己负责）。
+    state.mode = opts.mode === "daily" ? "daily"
+               : opts.mode === "catalog" ? "catalog" : "live";
     state.onData = opts.onData || null;
     state.onCriteria = opts.onCriteria || null;
     // 重挂载时清掉上一页的口径缓存，避免 A 页拿到 B 页残留的值
@@ -514,6 +537,15 @@
     renderSidebar(opts.navKey);
     renderHeader(opts.title || SITE.name, state.mode);
     loadStatus();
+
+    if (state.mode === "catalog") {
+      // 目录页的数据由页面自己取（一份静态清单，见 us.js），壳只给骨架和市场状态徽章。
+      // **不挂 btnRefresh**：页头在 catalog 模式下根本没渲染这个按钮，
+      // 元素不存在时 $() 返回 null，addEventListener 会立刻抛 TypeError 把 mount 打断，
+      // 页面就只剩空壳了。（同一个坑见下面 daily 分支的注释，已踩过两次。）
+      state.statusTimer = setInterval(loadStatus, STATUS_MS);   // 只刷市场状态徽章
+      return;
+    }
 
     if (state.mode === "daily") {
       // 这里原有一行 `$("btnRefresh").addEventListener(...)` 给「重新读取」按钮挂事件。

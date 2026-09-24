@@ -208,23 +208,62 @@
       .catch(function () { /* 拿不到就整列显示「待确认」，不影响行情表 */ });
   }
 
-  function reasonOf(symbol) {
-    var r = state.reasons[(symbol || "").toUpperCase()];
-    if (!r || !r.driver) return null;
-    return r;
+  /** 该代码在原因文件里的原始条目。 */
+  function entryOf(symbol) {
+    return state.reasons[(symbol || "").toUpperCase()] || null;
   }
 
-  /* 列与早盘页「个股异动榜」对齐：代码/公司全称/价格/涨跌幅/总市值/板块/行业 + 驱动原因。
+  /** 「驱动原因」列要的条目：**必须有 driver**。 */
+  function reasonOf(symbol) {
+    var r = entryOf(symbol);
+    return (r && r.driver) ? r : null;
+  }
+
+  /* 「A 股映射」列要的条目：必须有非空的映射候选。
+     ⚠️ 与 driver 分开判断，不要合并成一个检查：aShareMap 是独立字段，
+     某条完全可能只有原因没有映射（正常，映射是后补的、更慢的产物），
+     那时原因列照常显示，映射按钮显示成「未分析」态。 */
+  function mapOf(symbol) {
+    var r = entryOf(symbol);
+    var m = r && r.aShareMap;
+    return (m && m.rows && m.rows.length) ? m : null;
+  }
+
+  /** A 股映射列的按钮 —— 生成逻辑在 sharemap.js（那一列的渲染器），这里只做取数。 */
+  function mapBtn(symbol, name) {
+    return ShareMap.button(symbol, name, mapOf(symbol));
+  }
+
+  /** 点开某只票的 A 股映射弹窗。
+   *  内容由 sharemap.js 渲染 —— 把「数据 → HTML」抽出去是为了能单独单测，
+   *  也为了早盘页将来要用时不必复制一遍。 */
+  function openMap(symbol, name) {
+    var r = entryOf(symbol);
+    var m = mapOf(symbol);
+    Modal.open({
+      title: (name ? name + "（" + symbol + "）" : symbol) + " · A 股映射",
+      subtitle: m ? "共 " + m.rows.length + " 只候选 · 按关联强度排序"
+                  : "尚未生成",
+      // 驱动原因作为「映射依据」回显在弹窗顶部 —— skill 的输入就是它
+      bodyHtml: ShareMap.render(m, { driver: r ? r.driver : "" })
+    });
+  }
+
+  /* 列与早盘页「个股异动榜」对齐：代码/公司全称/价格/涨跌幅/总市值/板块/行业 + 驱动原因，
+     再加夜盘独有的「A 股映射」（早盘页还没有这一列，见 README）。
      原先的最后两列（「分档」药丸、「查原因」外链）已去掉 —— 分档信息由上方标签页承担，
      原因改成一整句话直接写出来，与早盘页同一口径。
-     「国家」列也去掉了（用户 2026-09-22 要求）：8 列与早盘页完全一致，宽屏下每列更宽松。
+     「国家」列也去掉了（用户 2026-09-22 要求）：宽屏下每列更宽松。
      与之配套的「只看非美国本土公司」勾选也一并去掉 —— 判断依据那一列不显示了，
-     留着一个看不见依据的过滤器只会让人以为数据缺失。 */
+     留着一个看不见依据的过滤器只会让人以为数据缺失。
+
+     「A 股映射」放在驱动原因**之后**：阅读顺序是「涨了多少 → 为什么涨 → 这逻辑对应 A 股谁」，
+     反过来的话读者要先看到结果再去找依据。 */
   function tableHtml(rows) {
     if (!rows.length) return '<div class="empty">当前筛选条件下没有数据</div>';
     var head = "<tr><th>代码</th><th>公司全称</th><th class=\"num\">价格(USD)</th>" +
                "<th class=\"num\">涨跌幅</th><th class=\"num\">总市值(亿美元)</th>" +
-               "<th>板块</th><th>行业</th><th>驱动原因</th></tr>";
+               "<th>板块</th><th>行业</th><th>驱动原因</th><th class=\"map\">A 股映射</th></tr>";
     var body = rows.map(function (r) {
       var dir = U.dirClass(r.chg);
       var reason = reasonOf(r.symbol);
@@ -242,6 +281,7 @@
         '<td class="ind" title="' + U.esc(r.industryEn || "") + '">' + U.esc(r.industry || "—") + "</td>" +
         '<td class="why" title="' + U.esc(whyTitle) + '">' +
           U.esc(reason ? reason.driver : "待确认") + "</td>" +
+        '<td class="map">' + mapBtn(r.symbol, r.name) + "</td>" +
         "</tr>";
     }).join("");
     return '<div class="tblwrap"><table class="t-evening"><thead>' + head + "</thead><tbody>" + body + "</tbody></table></div>";
@@ -284,6 +324,23 @@
   }
 
   $("q").addEventListener("input", function () { state.q = this.value; renderBody(); });
+
+  /* 「A 股映射」按钮 —— **事件委托**，不逐个绑定。
+     表格每次行情刷新都整块重建（夜盘中 3~4 分钟一次），逐个绑监听会越绑越多，
+     内存和响应都会慢慢退化。页里的分页器出于同样理由用了委托（见 linkage.js）。
+     两个 host 都要挂：主表和被剔除对照表用的是同一个 tableHtml，按钮形态一致，
+     少挂一个会出现"这儿的按钮点了没反应"。 */
+  function bindMapButtons(hostId) {
+    var host = $(hostId);
+    if (!host) return;
+    host.addEventListener("click", function (e) {
+      var b = e.target.closest ? e.target.closest(".map-btn") : null;
+      if (!b) return;
+      openMap(b.getAttribute("data-sym"), b.getAttribute("data-name"));
+    });
+  }
+  bindMapButtons("tableHost");
+  bindMapButtons("exclHost");
 
   initFilters();     // 下拉先建好；选项由首轮 renderFilters() 填
   Shell.mount({ navKey: "evening", title: "夜盘异动", onData: onData });

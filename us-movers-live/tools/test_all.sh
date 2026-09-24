@@ -28,9 +28,13 @@ run() {
 
 # 1) 语法自检 —— 最快的失败点，先跑
 run "语法自检（JS + Python + shell）" bash -c "
-  for f in util icons combo suggest shell morning evening; do
-    $NODE --check static/\$f.js || exit 1
+  # JS 清单也**从文件系统推导**，不手写。
+  # 2026-09-24 之前这里是手写的 7 个文件名，新增 modal.js / sharemap.js 时
+  # 这两个新文件压根没被检查过 —— 和下面 Python 那处是同一个毛病。
+  for f in static/*.js; do
+    $NODE --check \"\$f\" || exit 1
   done
+  echo \"  JS 语法 OK（\$(ls static/*.js | wc -l | tr -d ' ') 个）\"
 
   # Python 清单**从文件系统推导**，不手写。
   # 2026-09-23 之前这里是硬编码的 6 个文件名，alpaca/night_fetch/settings
@@ -62,7 +66,10 @@ run "早盘异动榜分档筛选"             "$NODE" tools/test_morning_bands.j
 run "早盘两列表的排序"               "$NODE" tools/test_morning_order.js
 run "关注池自定义增删"               "$NODE" tools/test_morning_watchlist.js
 run "美股代码目录（解析 + 排名）"     "$PY"   tools/test_symbols.py
+run "早盘全档校验（提前退出 / 阈值 / 缓存）" "$PY" tools/test_wide_scan.py
 run "夜盘标签页：点击反馈与跨页记忆" "$NODE" tools/test_evening_tabs.js
+run "夜盘 A 股映射（列 · 弹窗内容 · 组件）" "$NODE" tools/test_sharemap.js
+run "驱动原因 / A 股映射（字段透传）" "$PY"   tools/test_reasons.py
 run "外壳：轮询调度与页头"           "$NODE" tools/test_polling.js
 run "早盘总结页头（daily 模式）"     "$NODE" tools/test_daily_header.js
 run "早盘总结标签页记忆"             "$NODE" tools/test_morning_tabs.js
