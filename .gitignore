@@ -1,0 +1,10 @@
+# macOS 的目录元数据文件 —— 与项目无关，不该入库。
+#
+# 2026-09-24 补：仓库根此前**没有** .gitignore，规则只写在
+# us-movers-live/.gitignore 里 —— 而忽略规则只作用于「其所在目录及子目录」，
+# 管不到仓库根；更何况 .DS_Store 当时已被跟踪，而**忽略规则对已跟踪的文件无效**。
+# 所以它每次 git status 都以 modified 出现，还一度被提交进去过
+# （远端历史里有 "Update .DS_Store" 这种噪音提交）。
+#
+# 配套动作：git rm --cached .DS_Store（停止跟踪，磁盘文件保留，下次 commit 生效）。
+.DS_Store
