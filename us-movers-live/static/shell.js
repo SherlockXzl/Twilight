@@ -504,6 +504,39 @@
         if (!body.ok) {
           msgs.push(body.message || "复盘数据尚未生成。");
         }
+        /* 草稿（分析未完成）—— 2026-09-28 新增。
+           背景：取数一跑完就会先落一份「机械字段真实、分析字段留空」的 morning.json
+           （降级保险，见 morning_fetch.write_morning）。好处是页面不会停在旧日期；
+           代价是**草稿和完成版在页面上几乎一样** —— 榜单是满的、涨跌幅是真的，
+           只有驱动原因那列全是「分析未完成」、主线与关联两块是空的。
+           读者只会觉得"这页怎么这么空"，分不清是没写完还是坏了。
+           2026-09-28 早上正是如此：定时任务实际只做完取数就 success 退出了，
+           而页面上没有任何提示（stale 只按"距今 > 4 天"判，那次只差 3 天，不触发）。
+           判定由服务端给（meta.draft / meta.draftWhy，源头是 morning_fetch.assess_morning，
+           与 tools/check_morning.py 同一口径），前端不自算。 */
+        if (body.ok && meta.draft) {
+          /* coverage 缺失时**不猜**：老接口、或服务端还没上这个字段时，
+             只给泛称「分析字段」，不要凭 {} 反推出"主线为空、关联为空"——
+             那会把"我不知道"写成"它没有"，是两种完全不同的结论。 */
+          var cv = meta.coverage || null;
+          var lack = [];
+          if (cv) {
+            var total = cv.movers || 0;
+            var miss = Math.max(0, total - (cv.drivers || 0));
+            if (miss) lack.push("驱动原因缺 " + miss + "/" + total + " 只");
+            if (!cv.themes) lack.push("主线归纳为空");
+            if (!cv.linkage) lack.push("关联性分析为空");
+          }
+          var board = (cv && cv.movers)
+            ? "指数与「个股异动榜」" + cv.movers
+              + " 只票的价格 / 涨跌幅 / 市值 / 板块都是当日真实数据，可以照常读；"
+            : "指数与「个股异动榜」的行情是当日真实数据，可以照常读；";
+          msgs.push("本场复盘是草稿：行情已取到，分析还没写入。" + board
+            + "缺的是 " + (lack.join("、") || "分析字段") + "。"
+            + (meta.draftWhy ? "（判定依据：" + meta.draftWhy + "）" : ""));
+          msgs.push("补齐分析的任务每个工作日 06:30 运行。"
+            + "若这份草稿一直没被补齐，说明那次运行没跑完 —— 请检查定时任务。");
+        }
         if (meta.stale) {
           msgs.push("这份复盘不是最新交易日的（数据日期 " + (meta.tradeDate || "—")
             + "），自动更新可能没有成功，请检查定时任务。");
@@ -514,7 +547,9 @@
         // 同一天稍后，页脚的数据来源 / 生成方式也是按同一理由去掉的。
         // meta.notes 字段仍保留在 data/morning.json 与 MORNING.md 的数据契约里，
         // 定时任务写入的排障信息不会丢，想放回来只需恢复 msgs = msgs.concat(meta.notes)。
-        setNotice(msgs, body.ok ? "" : "warn");
+        // 底色：草稿与偏旧都是「这份数据需要你留意」，统一用 warn；
+        // 只有正常完成的最新场次才不带底色。
+        setNotice(msgs, (body.ok && !meta.draft && !meta.stale) ? "" : "warn");
 
         if (state.onData) state.onData(body);
       })

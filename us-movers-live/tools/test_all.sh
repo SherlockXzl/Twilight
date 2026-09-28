@@ -11,8 +11,21 @@
 set -uo pipefail
 cd "$(dirname "$0")/.." || exit 1
 
-NODE=${NODE:-/Users/xuzhuoli/.workbuddy/binaries/node/versions/22.22.2/bin/node}
-PY=${PY:-/Users/xuzhuoli/.workbuddy/binaries/python/versions/3.13.12/bin/python3}
+# 解释器路径**不要写死带版本号的目录**：managed runtime 升级过一次
+# （node 22.22.2 → 22.22.2-3），写死的那行就静默失效了 —— 脚本还在，跑起来却
+# 是 "no such file or directory"，看着像测试挂了。改成"先找 managed 目录，
+# 找不到再退回 PATH"。（2026-09-28 发现的：这一行当时已经指向不存在的路径。）
+NODE=${NODE:-$(ls -d /Users/xuzhuoli/.workbuddy/binaries/node/versions/*/bin/node 2>/dev/null | sort -V | tail -1)}
+NODE=${NODE:-$(command -v node)}
+PY=${PY:-$(ls -d /Users/xuzhuoli/.workbuddy/binaries/python/versions/*/bin/python3 2>/dev/null | sort -V | tail -1)}
+PY=${PY:-$(command -v python3)}
+
+if [ -z "$NODE" ] || [ -z "$PY" ]; then
+  echo "找不到 node 或 python3（可用 NODE=... PY=... 显式指定）"
+  exit 2
+fi
+echo "使用 node: $NODE"
+echo "使用 python: $PY"
 
 fail=0
 run() {
@@ -40,10 +53,10 @@ run "语法自检（JS + Python + shell）" bash -c "
   # 2026-09-23 之前这里是硬编码的 6 个文件名，alpaca/night_fetch/settings
   # 都没被检查 —— 同一个毛病也出现在 Dockerfile 的 COPY 清单上（只在
   # Render 上炸）。硬编码的清单迟早落后于代码，所以改成推导。
-  # 排除 build_*.py（一次性的数据快照生成脚本，不进运行时依赖）。
-  PYS=\$(ls *.py | grep -v '^build_' | tr '\n' ' ')
-  $PY -m py_compile \$PYS || exit 1
-  echo \"  Python 语法 OK（\$(echo \$PYS | wc -w | tr -d ' ') 个）：\$PYS\"
+  # 检查本身走 lint_py_syntax.py（ast 解析）而不是 py_compile：
+  # py_compile 会往仓库里写 __pycache__，一次"只读检查"顺手改了工作区，
+  # 在受限环境里还会直接失败（2026-09-28 报过 Operation not permitted）。
+  $PY tools/lint_py_syntax.py || exit 1
 
   # shell 脚本：语法 + 多字节变量陷阱（macOS bash 3.2 会把中文并进变量名）
   for f in tools/*.sh; do bash -n \"\$f\" || exit 1; done
@@ -69,9 +82,11 @@ run "美股代码目录（解析 + 排名）"     "$PY"   tools/test_symbols.py
 run "早盘全档校验（提前退出 / 阈值 / 缓存）" "$PY" tools/test_wide_scan.py
 run "夜盘标签页：点击反馈与跨页记忆" "$NODE" tools/test_evening_tabs.js
 run "夜盘 A 股映射（列 · 弹窗内容 · 组件）" "$NODE" tools/test_sharemap.js
+run "明暗对照 A 股业务映射（列 · 弹窗 · 折叠）" "$NODE" tools/test_businessmap.js
 run "驱动原因 / A 股映射（字段透传）" "$PY"   tools/test_reasons.py
 run "外壳：轮询调度与页头"           "$NODE" tools/test_polling.js
 run "早盘总结页头（daily 模式）"     "$NODE" tools/test_daily_header.js
+run "早盘总结草稿 / 偏旧提示"         "$NODE" tools/test_morning_draft.js
 run "早盘总结标签页记忆"             "$NODE" tools/test_morning_tabs.js
 run "后端：夜盘口径（窗口/基准/扫描/冻结）" "$PY" tools/test_night.py
 run "固定链接：命名隧道配置（config.yml + plist）" "$PY" tools/test_tunnel.py

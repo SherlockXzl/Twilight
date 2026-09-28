@@ -9,6 +9,11 @@ __pycache__/
 data/*.json
 !data/.gitkeep
 
+# 覆盖写入前的备份（cp reasons.json reasons.json.bak.<时间戳>）。
+# 不匹配上面那条 data/*.json —— 它以时间戳结尾，所以单列一行。
+data/*.bak*
+data/*.bak.*.tgz
+
 # 全档校验的按日缓存（morning_fetch.py 的 wide_scan 写；可丢，丢了就是重抓一遍）
 data/cache/
 

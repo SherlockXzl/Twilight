@@ -532,6 +532,71 @@ def write_morning(path, session, report):
     return doc
 
 
+# ------------------------------------------------------------ 完成度判定
+
+#: 分析完成的标志：智能体覆写时把 meta.generatedBy 改成这个技能名。
+#: 草稿（write_morning 落的）写的是 "morning_fetch.py" —— 两者刻意不同，
+#: 见 write_morning 的 docstring。
+DONE_BY = "us-stock-daily-review"
+
+
+def assess_morning(doc):
+    """判定一份 morning.json 是**草稿**还是**分析完成版**。
+
+    返回 `(is_draft: bool, why: str)`；`why` 只在草稿时非空，说明缺什么。
+
+    为什么要一个统一判定
+    --------------------
+    页面、自检脚本（tools/check_morning.py）、定时任务的收尾自检都要回答同一个问题
+    「这份复盘写完了吗」。此前只在 write_morning 的 docstring 里口头约定「看
+    meta.generatedBy」—— 三处各判各的，早晚会漂。所以收成一函数，谁要判定都调它。
+
+    为什么不能只看 generatedBy
+    -------------------------
+    取数脚本一跑完就落草稿（降级保险），而智能体是**增量覆写**的：写完 driver 先落一次，
+    再写 themes / linkage。中途被打断的那份 generatedBy 已经换了名字、但分析只做了一半。
+    这种情况如果判成「完成版」，页面就会把半成品当成品展示 —— 正是 2026-09-28 的观感。
+    """
+    if not isinstance(doc, dict):
+        return True, "数据不是对象"
+    meta = doc.get("meta") or {}
+    by = meta.get("generatedBy") or ""
+    if by != DONE_BY:
+        return True, "分析未写入（meta.generatedBy 是 %s）" % (by or "缺失")
+
+    movers = doc.get("movers") or []
+    if not movers:
+        return True, "异动榜为空"
+
+    todo = [r.get("symbol") or "?" for r in movers
+            if "分析未完成" in (r.get("driver") or "")
+            or not (r.get("driver") or "").strip()]
+    if todo:
+        head = "、".join(todo[:5]) + ("…" if len(todo) > 5 else "")
+        return True, "%d/%d 只个股缺驱动原因（%s）" % (len(todo), len(movers), head)
+
+    if not (doc.get("themes") or []):
+        return True, "主线归纳（themes）为空"
+    if not (doc.get("linkage") or []):
+        return True, "关联性分析（linkage）为空"
+    return False, ""
+
+
+def morning_stats(doc):
+    """给页面/自检用的完成度计数。字段缺失一律按 0 算，不抛异常。"""
+    movers = doc.get("movers") or [] if isinstance(doc, dict) else []
+    with_driver = sum(1 for r in movers
+                      if (r.get("driver") or "").strip()
+                      and "分析未完成" not in (r.get("driver") or ""))
+    return {
+        "movers": len(movers),
+        "drivers": with_driver,
+        "themes": len((doc.get("themes") or []) if isinstance(doc, dict) else []),
+        "linkage": len((doc.get("linkage") or []) if isinstance(doc, dict) else []),
+        "hints": len((doc.get("aShareHints") or []) if isinstance(doc, dict) else []),
+    }
+
+
 # ------------------------------------------------------------------ 主流程
 
 def main():

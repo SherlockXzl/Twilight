@@ -61,6 +61,12 @@ REASONS_PATH = os.path.join(BASE_DIR, "data", "reasons.json")
 #: 服务端只读 —— 那份抓取要翻几百页、跑十几分钟，绝不能挂在任何一次页面请求上。
 US_CATALOG_PATH = os.path.join(BASE_DIR, "data", "us_catalog.json")
 
+#: 「明暗对照」页「A 股公司业务映射」列的数据文件。
+#: 由 tools/build_us_business_map.py 生成（内容种子在那个脚本里）。
+#: **与目录分开一个文件、也分开一个接口**：目录 4279 行（gzip 后仍约 200KB），
+#: 这份只有几家、几 KB —— 合成一个接口会让每次打开页面都多搬一份用不到的数据。
+BUSINESS_MAP_PATH = os.path.join(BASE_DIR, "data", "us_business_map.json")
+
 ET = ZoneInfo("America/New_York")
 CST = ZoneInfo("Asia/Shanghai")
 
@@ -176,6 +182,38 @@ def read_us_catalog():
             "rows": rows}
 
 
+def read_us_business_map():
+    """「明暗对照」页「A 股公司业务映射」列的数据。
+
+    回答的是「这家美股公司做的生意，A 股里谁在做类似的」—— 看主营业务本身，
+    与「涨没涨、为什么涨」无关。所以它与夜盘异动页的「A 股映射」是两套口径
+    （那边是**事件驱动**的映射，输入是代码 + 驱动原因），数据也分开存，
+    唯一共用的东西是那个「点击查看」按钮（static/mapbtn.js）。
+
+    服务端**只做搬运**：`rows` 原样透传（键是美股代码）。
+    `note`（「列的是业务相似，不是供应关系」）也一并带出去 ——
+    那句口径由 businessmap.js 渲染，不能丢在传输层，否则读者会把
+    「业务相似」误读成「苹果的供应商」。
+    """
+    if not os.path.exists(BUSINESS_MAP_PATH):
+        return {"ok": False,
+                "message": "业务映射数据尚未生成。先跑 tools/build_us_business_map.py "
+                           "生成 data/us_business_map.json。"}
+    try:
+        with open(BUSINESS_MAP_PATH, encoding="utf-8") as f:
+            d = json.load(f)
+    except (OSError, ValueError) as e:
+        return {"ok": False, "message": "业务映射数据读取失败：%s" % e}
+
+    rows = d.get("rows") or {}
+    return {"ok": True,
+            "count": len(rows),
+            "builtAt": d.get("builtAt") or "",
+            "source": d.get("source") or "",
+            "note": d.get("note") or "",
+            "rows": rows}
+
+
 # ---------------------------------------------------------------- 早盘总结
 
 def read_morning():
@@ -184,6 +222,13 @@ def read_morning():
     文件不存在或损坏时返回 ok=False 并给出可操作的中文原因，
     不返回空结构让前端白屏。交易日距今超过 4 天（含周末）即标记 stale，
     提示"自动更新可能没跑起来"。
+
+    另外标出 **draft（草稿）** —— 取数脚本一跑完就会落一份"机械字段真实、
+    分析字段留空"的文件（降级保险，见 morning_fetch.write_morning）。没有这个标记，
+    草稿和完成版在页面上长得几乎一样：榜单是满的、涨跌幅是真的，只有驱动原因
+    那列全是「分析未完成」。2026-09-28 就因此让人以为页面坏了 —— 任务其实
+    success 退出、只做了取数那一步。判定用 morning_fetch.assess_morning，
+    与 tools/check_morning.py 是同一套口径。
     """
     if not os.path.exists(MORNING_PATH):
         return {"ok": False,
@@ -207,6 +252,12 @@ def read_morning():
             pass
     meta["fileMtime"] = datetime.fromtimestamp(
         os.path.getmtime(MORNING_PATH), CST).strftime("%Y-%m-%d %H:%M:%S")
+
+    draft, why = morning_fetch.assess_morning(data)
+    meta["draft"] = draft
+    if draft:
+        meta["draftWhy"] = why
+    meta["coverage"] = morning_fetch.morning_stats(data)
     return data
 
 
@@ -768,6 +819,8 @@ class Handler(SimpleHTTPRequestHandler):
             return self._json(read_reasons())
         if path == "/api/us-catalog":
             return self._json(read_us_catalog())
+        if path == "/api/us-business-map":
+            return self._json(read_us_business_map())
         if path == "/api/status":
             return self._json({"ok": True, "market": market_state(),
                                "source": SOURCE, "criteria": CRITERIA,

@@ -68,6 +68,16 @@
     //   都是生成过程的旁注，不是读者看盘需要的信息。
     //   这三个字段（sources / generatedBy / excludedNote）继续保留在契约里，
     //   定时任务照写，排障时看 JSON 或 /api/morning 即可。
+    //
+    //   ⚠️ 下面四个字段**不是写入方写的**，是服务端 read_morning() 现算后加上的派生字段
+    //      （所以文件里没有它们，只有 /api/morning 有）：
+    //        ageDays    距今天数
+    //        stale      ageDays > 4（含周末）
+    //        draft      这份是不是"只有取数、分析没写"的草稿（见下面「草稿与完成版」）
+    //        draftWhy   草稿的具体缺口（draft 为 false 时不给这个键）
+    //        coverage   {movers, drivers, themes, linkage, hints} 完成度计数，给页面与排障看
+    //      判定逻辑在 morning_fetch.assess_morning()，与 tools/check_morning.py 同一口径。
+    //      **前端不要自己算 draft** —— 页面、自检脚本、服务端三处各算各的，早晚会漂。
   },
 
   "indices": [                               // 大盘，ETF 代理口径
@@ -266,6 +276,7 @@
 - 服务端 `GET /api/morning`：文件不存在 / 解析失败时返回 `{ok:false, message:"…"}`，
   页面渲染空状态而不是白屏。
 - `meta.tradeDate` 距今天数 **> 4**（含周末）时自动标 `stale`，页面提示「自动更新可能没跑起来」。
+  （4 天这个阈值挡的是"整体没更新"；"更新了但只更新了一半"由 `draft` 挡，见下。）
 - 页面用 `mode:"daily"` 挂载：**不轮询**，页头显示 市场状态 / 复盘交易日 / 生成时间 / 数据源，
   只有一个「重新读取」按钮。日更数据挂轮询纯属白烧请求，且倒计时会误导。
 
@@ -285,16 +296,45 @@ SESSION_DATE=2026-09-21 python3 morning_fetch.py -o /tmp/raw.json \
 python3 morning_fetch.py --no-verify
 ```
 
-**按 `meta.generatedBy` 判断文件是哪一版**：
+## 草稿与完成版
+
+**按 `meta.generatedBy` 只能判一半** —— 它是"分析写没写过"，不是"分析写完了没有"：
 
 | 值 | 含义 |
 |---|---|
 | `morning_fetch.py` | **草稿** —— 机械字段真实，driver / themes / linkage 还没写 |
-| `us-stock-daily-review` | **完成版** —— 智能体分析后覆写过 |
+| `us-stock-daily-review` | 分析**开始写过**了（但可能只写了一半，见下） |
 
 这份草稿是刻意的降级保险：改之前只有「分析全部成功」才会更新文件，一旦分析超时或
 模型流中断，页面就停留在旧日期**且没有任何提示**（`meta.tradeDate` 要超过 4 天才标 stale）。
 2026-09-24 页面停在 09-23 的复盘，就是这么来的。
+
+**完整判定走 `morning_fetch.assess_morning()`**（页面、服务端、自检脚本共用）：
+
+```bash
+cd us-movers-live
+python3 tools/check_morning.py            # 读本地文件
+python3 tools/check_morning.py --url http://127.0.0.1:8787   # 读服务实际返回的那份
+```
+
+它逐关检查：`generatedBy` 是不是技能名 → 异动榜非空 → 每只票都有非「分析未完成」的 driver
+→ themes 非空 → linkage 非空。任一项不过就报「草稿 ✗」并指出缺什么，退出码 1。
+
+**为什么不能只看 `generatedBy`**：智能体是**增量覆写**的（先补 driver 落一次盘，再写
+themes/linkage 落第二次）。中途被打断的那份，`generatedBy` 已经换成技能名，
+但分析只做了一半 —— 只看这个字段就会把它当成品展示。
+
+### 草稿在页面上会怎样
+
+页面顶部会出现一条黄底提示（`shell.js` 的 `fetchDaily` 里渲染 `meta.draft`），写明
+哪部分已是真实数据、还缺哪一块。**这是 2026-09-28 加的**：
+那天 06:30 的调度因电脑休眠被跳过，09:16 App 起来后补跑，agent 只做完取数就
+success 退出了 —— 页面上榜单是满的、涨跌幅是真的，只有 driver 全是「分析未完成」、
+主线与关联是空的，而 `stale` 因为只差 3 天不触发，**没有任何提示**。
+读者只能看到"这页怎么这么空"，分不清是没写完还是坏了。
+
+同一套判定也让定时任务能在收尾时**自检**（见自动化「早盘总结 · 美股复盘生成」的第 7 步）：
+跑一次 `tools/check_morning.py`，不是「分析完成版 ✓」就不算做完，得回去补齐。
 
 ## 相关用例
 
