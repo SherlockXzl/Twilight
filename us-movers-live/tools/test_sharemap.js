@@ -60,7 +60,12 @@ function mkNode(tag) {
   return node;
 }
 
-global.window = {};
+/* window 指向 global 本身（与 test_evening_tabs.js 一致）。
+   ⚠️ 不能写成 `global.window = {}`：脚本之间会互相引用**裸全局名**
+   （sharemap.js 里直接写 `MapBtn.html(...)`），而那个名字在浏览器里就是 window 的属性。
+   如果 window 是个独立对象，`window.MapBtn` 有值、模块作用域里的 `MapBtn` 却是 undefined ——
+   报错信息是 "MapBtn is not defined"，但检查 window 又能看到它，很容易看糊。 */
+global.window = global;
 global.document = {
   body: { style: {}, appendChild() {} },
   createElement: mkNode,
@@ -68,6 +73,8 @@ global.document = {
   addEventListener(type, fn) { (documentHandlers[type] = documentHandlers[type] || []).push(fn); }
 };
 
+// 加载顺序要紧：sharemap.button 现在转发给 mapbtn.js 的 MapBtn（两页共用那一份实现）
+require(ROOT + "static/mapbtn.js");
 require(ROOT + "static/sharemap.js");
 require(ROOT + "static/modal.js");
 const S = global.window.ShareMap;

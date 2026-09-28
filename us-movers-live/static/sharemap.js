@@ -114,17 +114,18 @@
       "</div>";
   }
 
-  /** 「A 股映射」列的按钮（表格单元格里的那个）。
-   *  没有分析结果时**按钮仍然可点**，只是样式变灰 —— 点开是一段说明，
-   *  比一个灰按钮更有信息量：灰按钮说不出"为什么点不了、要等什么"。
-   *  放在这里而不是 evening.js，是因为「什么算有数据、有数据长什么样」
-   *  本来就该由这一列的渲染器决定，顺便也让这条规则可以被单测钉住。 */
+  /** 「A 股映射」列的按钮 —— 按钮 HTML 由 static/mapbtn.js 生成，
+   *  与明暗对照页的「A 股公司业务映射」列共用同一份实现（只差文案）。
+   *  放在共用模块里而不是各自实现，是因为两处必须长得一样、行为也一样
+   *  （无数据时**仍可点**，点开是一段说明）；各写一份必然慢慢漂移，
+   *  而"按钮态不一致"没人会当成 bug 报出来，只会觉得某页怪。
+   *  这里只负责把「有几条映射」折算成条数，并给出本页的措辞。 */
   S.button = function (symbol, name, map) {
     var n = (map && map.rows && map.rows.length) ? map.rows.length : 0;
-    var title = n ? "查看 " + n + " 只候选 A 股及其关联依据" : "还没有 A 股映射分析";
-    return '<button type="button" class="map-btn' + (n ? "" : " map-btn--none") +
-      '" data-sym="' + S.esc(symbol) + '" data-name="' + S.esc(name || "") +
-      '" title="' + S.esc(title) + '">点击查看</button>';
+    return MapBtn.html(symbol, name, n, {
+      title: "查看 " + n + " 只候选 A 股及其关联依据",
+      empty: "还没有 A 股映射分析"
+    });
   };
 
   /** aShareMap → 弹窗 body 的 HTML。

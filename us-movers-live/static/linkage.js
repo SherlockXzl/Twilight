@@ -20,7 +20,7 @@
   //: 页数也不至于太多（43 页）。真要找某家公司，搜索比翻页快得多。
   var PAGE_SIZE = 100;
 
-  var state = { q: "", sector: "", industry: "", rows: [], meta: null, page: 1 };
+  var state = { q: "", sector: "", industry: "", rows: [], meta: null, page: 1, biz: {} };
 
   // ------------------------------------------------------------ 过滤
 
@@ -38,12 +38,41 @@
 
   // ------------------------------------------------------------ 渲染
 
-  /** 四列：代码 / 公司全称 / 板块 / 行业。
+  /* 「A 股公司业务映射」列的数据：GET /api/us-business-map（按需取，见 loadBizMap）。
+     键是美股代码，值形如 { name, business, peers: [...] }。 */
+  function bizOf(symbol) {
+    return state.biz[(symbol || "").toUpperCase()] || null;
+  }
+
+  /** 最后一列的按钮 —— 与夜盘页共用 static/mapbtn.js，只差 title 措辞。 */
+  function mapBtn(symbol, name) {
+    var e = bizOf(symbol);
+    var n = (e && e.peers) ? e.peers.length : 0;
+    return MapBtn.html(symbol, name, n, {
+      title: "查看 " + n + " 家业务相似的 A 股公司",
+      empty: "还没有业务映射数据"
+    });
+  }
+
+  /** 点开某家公司的业务映射弹窗。
+   *  内容由 businessmap.js 渲染（与夜盘页的 sharemap.js 是两套口径，见该文件注释）。 */
+  function openBizMap(symbol, name) {
+    var e = bizOf(symbol);
+    var n = (e && e.peers) ? e.peers.length : 0;
+    Modal.open({
+      title: (name ? name + "（" + symbol + "）" : symbol) + " · A 股公司业务映射",
+      subtitle: n ? "业务相似 " + n + " 家 · 点任意一行展开业务描述" : "尚未生成",
+      bodyHtml: BusinessMap.render(e)
+    });
+  }
+
+  /** 五列：代码 / 公司全称 / 板块 / 行业 / A 股公司业务映射。
    *  表格类名用 t-catalog（不是 t-evening）：单元格样式两者共用，但表宽要单独定 ——
-   *  t-evening 的 1560px 是给 8 列行情表算的，4 列套上去每列会被拉到近 400px。 */
+   *  t-evening 的 1560px 是给 8 列行情表算的，套在少列表上每列会被拉到近 400px。 */
   function tableHtml(rows) {
     if (!rows.length) return '<div class="empty">当前筛选条件下没有数据</div>';
-    var head = "<tr><th>代码</th><th>公司全称</th><th>板块</th><th>行业</th></tr>";
+    var head = "<tr><th>代码</th><th>公司全称</th><th>板块</th><th>行业</th>" +
+               '<th class="map">A 股公司业务映射</th></tr>';
     var body = rows.map(function (r) {
       return "<tr>" +
         '<td class="code">' + U.esc(r.symbol) + "</td>" +
@@ -52,6 +81,7 @@
           U.esc(r.sector || "—") + "</td>" +
         '<td class="ind" title="' + U.esc(r.industryEn || "") + '">' +
           U.esc(r.industry || "—") + "</td>" +
+        '<td class="map">' + mapBtn(r.symbol, r.name) + "</td>" +
         "</tr>";
     }).join("");
     return '<div class="tblwrap"><table class="t-catalog"><thead>' + head +
@@ -183,6 +213,15 @@
     if (host && host.scrollIntoView) host.scrollIntoView({ block: "start" });
   });
 
+  /* 「A 股公司业务映射」按钮 —— **事件委托**，不逐个绑定。
+     表格每次翻页 / 筛选 / 刷新都整块重建，逐个 addEventListener 会越绑越多
+     （和上面分页器、以及夜盘页是同一个道理）。 */
+  $("tableHost").addEventListener("click", function (e) {
+    var b = e.target.closest ? e.target.closest(".map-btn") : null;
+    if (!b) return;
+    openBizMap(b.getAttribute("data-sym"), b.getAttribute("data-name"));
+  });
+
   // ------------------------------------------------------------ 取数
 
   /** 搜索输入防抖：每敲一个字都重过滤 + 重画整张表会明显卡手。
@@ -231,7 +270,24 @@
       });
   }
 
+  /* 「A 股公司业务映射」列的数据 —— 单独一个接口，**与目录分开取**：
+     目录有 4279 行（gzip 后仍约 200KB），而这份映射目前只有几家、几 KB。
+     合成一个接口会让每次打开页面都多搬一份用不到的数据。
+     映射内容的变化比目录慢得多（加了公司才变），所以进页面取一次即可，
+     不跟翻页/筛选走。拿不到就整列灰着，不影响目录表本身。 */
+  function loadBizMap() {
+    return fetch("/api/us-business-map", { cache: "no-store" })
+      .then(function (r) { return r.json(); })
+      .then(function (j) {
+        if (!j || !j.ok) return;
+        state.biz = j.rows || {};
+        renderBody();     // 按钮态从"灰"变"可点"，需要重画一次
+      })
+      .catch(function () { /* 静默：这一列不是页面的主体 */ });
+  }
+
   initFilters();     // 下拉先建好；选项由首轮 renderFilters() 填
   Shell.mount({ navKey: "linkage", title: "明暗对照", mode: "catalog" });
   load();
+  loadBizMap();      // 映射只在进页面时取一次
 })();

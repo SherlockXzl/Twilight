@@ -145,6 +145,8 @@ eval(fs.readFileSync(ROOT + "static/combo.js", "utf8"));
 // evening.js 渲染「A 股映射」列时会调 ShareMap.button(...)，所以要一起加载。
 // 页面本身没问题（index.html 里有 <script src="sharemap.js">），
 // 是这类用例自己拼运行环境时容易漏 —— 漏了会报 ShareMap is not defined。
+// mapbtn.js 必须排在 sharemap.js 前面：前者是按钮的实现，后者只做转发。
+eval(fs.readFileSync(ROOT + "static/mapbtn.js", "utf8"));
 eval(fs.readFileSync(ROOT + "static/sharemap.js", "utf8"));
 // modal.js 只在"点了按钮之后"才用到，但第 16 节要验证这条链路，所以也加载。
 eval(fs.readFileSync(ROOT + "static/modal.js", "utf8"));

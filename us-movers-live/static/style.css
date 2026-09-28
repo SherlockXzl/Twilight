@@ -326,11 +326,11 @@ th.map,td.map{width:208px;text-align:center;vertical-align:middle;
 .map-btn--none:hover{background:#f7f9fb;border-color:var(--line);color:var(--ink2)}
 
 /* ---------- 「明暗对照」的全市场目录表 ---------- */
-/* 只有 4 列（代码 / 公司全称 / 板块 / 行业），所以**不能**沿用上面那条 1560px ——
-   那是给 8 列行情表算的，套在 4 列上每列会被拉到近 400px，内容稀疏得看不出是一张表。
-   单元格样式（td.code / td.name / td.sec / td.ind）都是全站共用的，
-   这里因此只压表宽，不重定义任何单元格规则（理由同上一条注释）。 */
-table.t-catalog{min-width:760px}
+/* 五列（代码 / 公司全称 / 板块 / 行业 / A 股公司业务映射），
+   所以**不能**沿用行情表那条 1560px —— 那是给 8 列算的，套在少列表上每列会被拉到
+   近 400px，内容稀疏得看不出是一张表。
+   这里 = 760（前四列基准）+ 208（映射列宽，与夜盘页同一个按钮列，见上面那节）。 */
+table.t-catalog{min-width:968px}
 
 /* ---------- 「明暗对照」的分页条 ---------- */
 /* 这张表改成每页 100 条之后，上面那条 content-visibility 其实已用不太上
@@ -610,6 +610,42 @@ table.t-catalog tbody tr{content-visibility:auto;contain-intrinsic-size:auto 41p
 .sm-empty p.hint{font-size:var(--fs-2);color:var(--ink3);line-height:1.75}
 .sm-empty code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;
   font-size:var(--fs-1);background:#f2f4f7;border-radius:4px;padding:1px 5px}
+
+/* ==================================================================
+   「A 股公司业务映射」弹窗内容（static/businessmap.js）
+   ------------------------------------------------------------------
+   与上面的 .sm-* 是两套口径（业务相似度 vs 事件驱动映射），但**基础件复用**：
+   .sm-h（小标题）、.sm-tag（标签）、.sm-empty（空状态）在两边长得一样，
+   共用一个类比各写一份好 —— 那些属于"弹窗内的通用排版"，不是某一列特有的。
+
+   「点击展开」用原生 <details>，所以这里只需做两件事：
+   换掉浏览器默认的三角标记、给自定义箭头加一个旋转动画。
+   ================================================================== */
+.bm-first{margin-top:4px}
+.bm-biz-main{margin:0;font-size:var(--fs-3);color:var(--ink2);line-height:1.8}
+.bm-list{display:flex;flex-direction:column;gap:8px}
+.bm-peer{border:1px solid var(--line);border-radius:9px;background:var(--card)}
+/* summary 改成 flex 之前要先把默认的 list-style 三角关掉 ——
+   它在 flex 布局里的位置不受控，而我们要的是最右侧那个会转的箭头。 */
+.bm-peer > summary{display:flex;align-items:center;gap:9px;padding:10px 14px;
+  cursor:pointer;list-style:none;border-radius:9px}
+.bm-peer > summary::-webkit-details-marker{display:none}
+.bm-peer > summary:hover{background:#fafbfd}
+/* 展开后把分隔线画在标题行下方，视觉上表明"这行底下挂着一块内容" */
+.bm-peer[open] > summary{border-bottom:1px solid var(--line);border-radius:9px 9px 0 0}
+.bm-code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:var(--fs-3);
+  color:var(--ink);font-weight:600;font-variant-numeric:tabular-nums}
+.bm-name{font-size:var(--fs-3);color:var(--ink);font-weight:500}
+/* 箭头推到最右：公司名长短不一，固定在右侧才排得齐 */
+.bm-ar{margin-left:auto;flex:0 0 auto;color:var(--ink3);font-size:var(--fs-1);
+  transition:transform .15s}
+.bm-peer[open] .bm-ar{transform:rotate(90deg)}
+.bm-biz{margin:0;padding:11px 14px 13px;font-size:var(--fs-2);color:var(--ink2);
+  line-height:1.75}
+/* 「业务相似 ≠ 供应关系」那句说明。用浅底块与列表分开 ——
+   它是一句提醒，不是又一个条目。 */
+.bm-note{margin:14px 0 0;padding:10px 13px;background:#f7f8fa;border-radius:8px;
+  font-size:var(--fs-1);color:var(--ink3);line-height:1.7}
 
 @media(max-width:760px){
   .modal-mask{padding:16px 12px}

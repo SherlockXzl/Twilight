@@ -40,6 +40,13 @@
 <script src="util.js"></script>
 <script src="icons.js"></script>
 <script src="combo.js"></script>
+<!-- mapbtn.js：映射列的「点击查看」按钮，与夜盘异动页共用同一份实现 -->
+<script src="mapbtn.js"></script>
+<script src="modal.js"></script>
+<!-- businessmap.js：把「A 股公司业务映射」的数据渲染成弹窗内容（纯函数）。
+     与 night 页的 sharemap.js 是两套口径（那边是事件驱动、这边是业务相似度），
+     所以是两个渲染器，别合并。 -->
+<script src="businessmap.js"></script>
 <script src="shell.js"></script>
 <script src="linkage.js"></script>
 </body>
