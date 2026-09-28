@@ -25,13 +25,10 @@
   //: 页数也不至于太多（43 页）。真要找某家公司，搜索比翻页快得多。
   var PAGE_SIZE = 100;
 
-  //: `/api/us-business-map` 响应的版本号，必须与服务端 server.py 的
-  //: BUSINESS_MAP_SCHEMA 一致。它的唯一用途是**认出旧版服务**
-  //: （前端已是新版、服务进程还跑着改动前的 server.py）——
-  //: 那种错配下接口照样 200、字段也照样有，只是缺了 industries/overrides，
-  //: 于是 bizOf() 对每一行都返回 null：页面表现为「全部按钮变灰、点开说没有映射数据」，
-  //: 而数据一份不少地躺在磁盘上。见 loadBizMap。
-  var BIZ_SCHEMA = 2;
+  //: `/api/us-business-map` 响应的版本号。真值放在 static/bizmap.js 的
+  //: BizMap.SCHEMA —— 早盘总结页也要认这个号（那边悬停提示读同一份数据），
+  //: 两处各写一份迟早只剩一处是对的。这里只取个别名，下面照旧用。
+  var BIZ_SCHEMA = BizMap.SCHEMA;
 
   /* state 里三个「是否已就绪」的标志值得说明，它们都对应一个会骗人的默认值：
 
@@ -94,24 +91,10 @@
      同一条行业说明只存一份。组装放在前端做 —— 服务端替前端展开的话，
      144 条说明会被复制成 4279 份，接口体积从几百 KB 涨到十几 MB。
 
-     返回 null = 目录里没有这家。返回对象里 peers 可能为空（所属行业在 A 股
-     没有对标），那种情况弹窗**仍有内容**（行业说明），所以按钮不该画成灰的。 */
+     组装本身在 static/bizmap.js 里（早盘总结页的悬停提示读同一份数据、
+     走同一套口径，见那个文件的注释）。 */
   function bizOf(symbol) {
-    var b = state.biz;
-    if (!b) return null;
-    var sym = (symbol || "").toUpperCase();
-    var row = (b.rows || {})[sym];
-    if (!row) return null;
-
-    var ov = (b.overrides || {})[sym];
-    if (ov) {                        // 公司级精写优先于行业级
-      return { name: row.name, scope: "company",
-               business: ov.business, peers: ov.peers || [] };
-    }
-    var ind = (b.industries || {})[row.industryKey];
-    if (!ind) return null;
-    return { name: row.name, scope: "industry",
-             business: ind.desc, industryLabel: ind.zh, peers: ind.peers || [] };
+    return BizMap.of(state.biz, symbol);
   }
 
   /** 最后一列的按钮 —— 与夜盘页共用 static/mapbtn.js，只差 title 措辞。

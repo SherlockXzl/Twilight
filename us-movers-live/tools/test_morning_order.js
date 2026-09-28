@@ -128,10 +128,12 @@ function section(t) { console.log("\n" + t); }
 /* ------------------------------------------------------------------ 读取 */
 const YI = 1e8;
 
-/** 异动榜当前显示顺序 */
+/** 异动榜当前显示顺序。
+ *  正则容忍 td 上的其它属性（`[^>]*`）—— 2026-09-28 给代码格加了 data-biztip
+ *  （A 股映射悬停用），写死成 `<td class="code">` 的话会**静默**匹配到 0 行。 */
 function mvOrder() {
-  return (els.mvTableHost.innerHTML.match(/<td class="code">([^<]+)<\/td>/g) || [])
-    .map(s => s.replace(/^<td class="code">|<\/td>$/g, "")).join(",");
+  return (els.mvTableHost.innerHTML.match(/<td class="code"[^>]*>([^<]+)<\/td>/g) || [])
+    .map(s => (s.match(/>([^<]+)<\/td>/) || [])[1]).join(",");
 }
 /** 关注池每个方块：按 <div class="tile"> 切开取，不用带前瞻的正则 ——
  *  最后一个方块后面接的是容器闭合标签，前瞻式写法会把它漏掉。
@@ -139,15 +141,17 @@ function mvOrder() {
 function wlTiles() {
   return wlHost.innerHTML.split('<div class="tile">').slice(1);
 }
-/** 关注池当前显示顺序（按方块里的 tile-code） */
+/** 关注池当前显示顺序（按方块里的 tile-code）。
+ *  同样容忍 span 上的其它属性 —— 那里现在也挂着 data-biztip。 */
+const TILE_CODE = /<span class="tile-code"[^>]*>([^<]+)<\/span>/;
 function wlOrder() {
   return wlTiles()
-    .map(b => (b.match(/<span class="tile-code">([^<]+)<\/span>/) || [])[1]).join(",");
+    .map(b => (b.match(TILE_CODE) || [])[1]).join(",");
 }
 /** 关注池每格的振幅条宽度，形如 "AAA:100,BBB:10" */
 function wlBars() {
   return wlTiles().map(function (b) {
-    const c = (b.match(/<span class="tile-code">([^<]+)<\/span>/) || [])[1];
+    const c = (b.match(TILE_CODE) || [])[1];
     const w = (b.match(/style="width:(\d+)%"/) || [])[1];
     return c + ":" + w;
   }).join(",");

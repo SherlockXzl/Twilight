@@ -445,6 +445,33 @@ table.t-catalog tbody tr{content-visibility:auto;contain-intrinsic-size:auto 41p
 .tile.is-err .tile-n{color:var(--amber);white-space:normal}
 .tile.is-pending .tile-n{color:var(--ink3)}
 
+/* ---------- A 股映射悬停卡（早盘总结 · 个股异动榜 / 个人关注池）----------
+   fixed + pointer-events:none 的理由见 static/biztip.js 的文件头
+   （外层 .tblwrap 会裁掉 absolute；卡片能接住鼠标就会自己把自己关掉）。
+
+   光标**保持原样**：这里曾经是 `cursor:help`（问号），2026-09-28 用户要求去掉。
+   代码列与公司名本来就是普通的表格文字，一放上去整格变问号，等于给一片死文字
+   加了"这里能点"的暗示 —— 它既点不动，也只是多看一眼的补充信息。
+   卡片自己出现就够了，不需要靠光标预告。 */
+.biztip{position:fixed;left:0;top:0;z-index:60;max-width:320px;pointer-events:none;
+  background:var(--card);border:1px solid var(--line);border-radius:10px;
+  box-shadow:0 8px 24px rgba(22,25,29,.14);padding:10px 13px 9px;
+  font-size:var(--fs-2);line-height:1.5}
+.biztip[hidden]{display:none}
+.bt-hd{display:flex;align-items:baseline;gap:8px;flex-wrap:wrap;margin-bottom:7px}
+.bt-sym{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:var(--fs-3)}
+.bt-scope{font-size:var(--fs-1);color:var(--ink3)}
+.bt-list{list-style:none;margin:0;padding:0}
+.bt-list li{display:flex;gap:9px;align-items:baseline;padding:2px 0}
+.bt-code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;color:var(--ink2);
+  flex:0 0 auto;font-variant-numeric:tabular-nums}
+.bt-name{color:var(--ink)}
+.bt-none{margin:0;color:var(--ink2)}
+.bt-note{margin:7px 0 0;font-size:var(--fs-1);color:var(--ink3);line-height:1.45}
+/* 分隔线只加在"紧跟对标列表"的那一句上：没有对标时下面也是两条 <p>，
+   不给限定条件会画出两根虚线。 */
+.bt-list + .bt-note{margin-top:8px;padding-top:6px;border-top:1px dashed var(--line)}
+
 /* ---------- 主线归纳 / 关联性分析 ---------- */
 .theme{background:#f7f9fb;border:1px solid var(--line);border-left:3px solid var(--line);
   border-radius:12px;padding:14px 18px;margin-bottom:12px}

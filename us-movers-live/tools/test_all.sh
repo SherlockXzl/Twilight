@@ -44,10 +44,12 @@ run "语法自检（JS + Python + shell）" bash -c "
   # JS 清单也**从文件系统推导**，不手写。
   # 2026-09-24 之前这里是手写的 7 个文件名，新增 modal.js / sharemap.js 时
   # 这两个新文件压根没被检查过 —— 和下面 Python 那处是同一个毛病。
-  for f in static/*.js; do
+  # tools/*.js 一起查：那些是"跑起来才知道错"的用例，可 hover_check.js 这类
+  # 只在需要时手动跑的工具，写错了能一直躺着没人发现（2026-09-28 补）。
+  for f in static/*.js tools/*.js; do
     $NODE --check \"\$f\" || exit 1
   done
-  echo \"  JS 语法 OK（\$(ls static/*.js | wc -l | tr -d ' ') 个）\"
+  echo \"  JS 语法 OK（\$(ls static/*.js tools/*.js | wc -l | tr -d ' ') 个）\"
 
   # Python 清单**从文件系统推导**，不手写。
   # 2026-09-23 之前这里是硬编码的 6 个文件名，alpaca/night_fetch/settings
@@ -85,6 +87,8 @@ run "夜盘 A 股映射（列 · 弹窗内容 · 组件）" "$NODE" tools/test_s
 run "明暗对照 A 股业务映射（列 · 弹窗 · 折叠）" "$NODE" tools/test_businessmap.js
 run "明暗对照「只看有 A 股映射」（口径 / 载入态 / 计数）" "$NODE" tools/test_linkage_bizfilter.js
 run "明暗对照映射数据（与目录同源 / 引用完整）" "$PY" tools/test_business_map_data.py
+run "A 股映射悬停卡（渲染 / 定位 / 悬停行为）" "$NODE" tools/test_biztip.js
+run "早盘总结 A 股映射悬停（触发点 / 预热 / 旧服务）" "$NODE" tools/test_morning_biztip.js
 run "驱动原因 / A 股映射（字段透传）" "$PY"   tools/test_reasons.py
 run "外壳：轮询调度与页头"           "$NODE" tools/test_polling.js
 run "早盘总结页头（daily 模式）"     "$NODE" tools/test_daily_header.js

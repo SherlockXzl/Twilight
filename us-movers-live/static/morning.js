@@ -119,7 +119,9 @@
     /** 自选取数失败原因（键＝usXXX）。空串＝还没取过（当作"取数中"） */
     wlErrors: {},
     /** 工具条上的即时提示（"已移除 AAPL" / 取数失败原因），不进 localStorage */
-    wlMsg: ""
+    wlMsg: "",
+    /** 「A 股映射」整包（/api/us-business-map 的响应）与加载标记，见「悬停提示」一节 */
+    biz: null, bizLoading: false
   };
 
   /** 当前已加载的复盘数据。壳（shell.js）在调 onData 之前就写好了 state.data，
@@ -401,6 +403,13 @@
    *  都来自同一套取数管道（finviz → screening.normalize），数值格式走同一个 U.fPrice / U.fPct / U.fCap。
    *  两页差异只剩最后一列：那边是「查原因」外链，这边是写好的「驱动原因」整句话，
    *  所以给它单独一列并放开宽度（td.why），而不是塞进标签列。 */
+  /** 该行用于查「A 股映射」的代码 —— 与列里显示的**同一个**（见 codeText）：
+   *  映射数据的键是裸代码（AAPL），关注池里的原始写法带市场前缀（usAAPL），
+   *  所以属性里必须放剥过前缀的形态，否则悬停永远是空的（且不会报错）。 */
+  function bizSym(r) {
+    return codeText((r && (r.symbol || r.code)) || "");
+  }
+
   function moversTableHtml(rows) {
     if (!rows.length) return '<div class="empty">当前筛选条件下没有数据</div>';
     var head = "<tr><th>代码</th><th>公司全称</th><th class=\"num\">价格(USD)</th>" +
@@ -409,9 +418,13 @@
     var body = rows.map(function (r) {
       var chg = mvChg(r);
       var dir = dirOf(chg);
+      var sym = bizSym(r);
+      /* data-biztip 挂在**代码与公司名两格**上（用户要求"光标放在代码或名称时"都触发）。
+         值就是该行的美股代码 —— 悬停卡自己据此查「A 股公司业务映射」（见 biztip.js）。
+         放在 td 上而不是内部元素上：格子整块可触发，且不必给每个子元素挂属性。 */
       return "<tr>" +
-        '<td class="code">' + U.esc(codeText(r.symbol || r.code)) + "</td>" +
-        '<td class="name">' +
+        '<td class="code" data-biztip="' + U.esc(sym) + '">' + U.esc(sym) + "</td>" +
+        '<td class="name" data-biztip="' + U.esc(sym) + '">' +
           (r.giant ? '<span class="band ' + dir + '">★ 巨头</span> ' : "") +
           U.esc(r.name || "—") + "</td>" +
         '<td class="num">' + U.fPrice(mvPrice(r)) + "</td>" +
@@ -672,9 +685,14 @@
     var full = String(r.code || "");
     var del = '<button class="tile-del" data-act="del" data-code="' + U.esc(full) +
               '" title="从关注池移除" aria-label="移除">×</button>';
+    /* data-biztip 挂在方块里的**代码**与**公司名**上（用户要求这两处都要触发）。
+       取数中 / 取数失败的方块也挂：映射来自静态 JSON，与这只票的行情取没取到
+       毫无关系 —— 没理由因为行情慢到就顺带把 A 股映射也藏起来。
+       值用 codeText(full)（剥掉 us 前缀），见 bizSym 的注释。 */
+    var tip = ' data-biztip="' + U.esc(codeText(full)) + '"';
     if (it.pending) {
       return '<div class="tile is-pending">' + del +
-        '<div class="tile-t"><span class="tile-code">' + U.esc(codeText(full)) + "</span></div>" +
+        "<div class=\"tile-t\"><span class=\"tile-code\"" + tip + ">" + U.esc(codeText(full)) + "</span></div>" +
         '<div class="tile-n">取数中…</div></div>';
     }
     if (it.err) {
@@ -683,7 +701,7 @@
       var r = it.err;
       return '<div class="tile is-err' + (r.retry ? " is-retry" : "") +
           '"' + (r.retry ? ' data-act="retry" data-code="' + U.esc(full) + '"' : "") + ">" + del +
-        '<div class="tile-t"><span class="tile-code">' + U.esc(codeText(full)) + "</span></div>" +
+        "<div class=\"tile-t\"><span class=\"tile-code\"" + tip + ">" + U.esc(codeText(full)) + "</span></div>" +
         '<div class="tile-n">' + U.esc(r.msg) + "</div>" +
         '<div class="tile-k">' + (r.retry ? "点击重试" : "换个代码，或点右上角移除") + "</div></div>";
     }
@@ -697,9 +715,9 @@
         (kw ? U.esc(kw) : "") + "</div>"
       : "";
     return '<div class="tile' + (it.custom ? " is-custom" : "") + '">' + del +
-      '<div class="tile-t"><span class="tile-code">' + U.esc(codeText(full)) + "</span>" +
+      "<div class=\"tile-t\"><span class=\"tile-code\"" + tip + ">" + U.esc(codeText(full)) + "</span>" +
         '<span class="tile-chg ' + cls + '">' + pct(r.chgPct) + "</span></div>" +
-      '<div class="tile-n">' + U.esc(r.name || "—") + "</div>" +
+      '<div class="tile-n"' + tip + ">" + U.esc(r.name || "—") + "</div>" +
       '<div class="tile-p">$' + fNum(r.close) +
         (r.capYi ? '<span class="tile-cap"> · ' + capYi(r.capYi) + "</span>" : "") + "</div>" +
       bar(r.chgPct, it.mx, cls) + foot +
@@ -1020,6 +1038,82 @@
     });
   }
 
+  /* ------------------------------------------------------- A 股映射的悬停提示
+     （2026-09-28 按用户要求）
+
+     光标放在「个股异动榜」的代码/公司名、「个人关注池」方块里的代码/公司名上，
+     弹一张小卡列出 A 股里业务相似的公司（代码 + 名称）。
+
+     数据就是「明暗对照」页那一列用的同一份（/api/us-business-map →
+     static/bizmap.js 组装），**不另做一份** —— 两页对"谁跟谁对标"必须是同一句话，
+     各存一份迟早对不上，而用户只会觉得"有一页错了"。
+
+     三个刻意的选择：
+
+     1. **预热而不是悬停时再取。** 映射整包 426KB（gzip 后 95KB），若等光标落到
+        格子上才开始下载，第一格必然什么都看不到。所以在**首屏渲染完之后**悄悄取一次。
+        不放在 onData 里同步取，是为了不跟首屏那份复盘 JSON 抢带宽。
+        触屏设备（hover:none）直接跳过 —— 那里这个功能根本触发不了，白搬 426KB。
+
+     2. **认版本号，不认字段有没有。** 服务端换了响应结构而进程没重启时（2026-09-28
+        真发生过），接口照样 200、rows 也一家不少，只是缺 industries/overrides。
+        照单全收的话每一格的悬停都会静默变成"什么都没有"，而数据其实躺在磁盘上。
+        版本对不上就整块不启用（见 BizMap.SCHEMA）。
+
+     3. **拿不到就什么都不显示**，不给"载入中/暂无"的占位卡 —— 悬停是路过的动作，
+        而且「这家在 A 股没有对标」只有在数据到手时才成立，不能拿它顶替"没加载"。
+
+     4. **不给特殊光标**（2026-09-28 用户要求去掉问号）。此前数据到位后会给
+        body 加 .has-biz、把整格变成 `cursor:help` —— 那是在给一片死文字加
+        "这里能点"的暗示，而它既点不动、也只是补充信息。光标保持原样，
+        "有没有东西"由数据自己决定（BizTip.render 返回空串即不显示）。 */
+
+  /** 这台设备有"悬停"这个概念吗。matchMedia 缺失（老浏览器、部分测试桩）时
+   *  按"有"处理 —— 宁可多取一次，也不要让桌面端平白少一个功能。 */
+  function canHover() {
+    try {
+      if (!window.matchMedia) return true;
+      return window.matchMedia("(hover: hover)").matches;
+    } catch (e) { return true; }
+  }
+
+  /** 接线 + 预热取数。**每次 render 都会走到这里**，靠被调用的两方各自幂等：
+   *    BizTip.init 重复调用只是返回（接线只做一次，见 biztip.js）；
+   *    warmBizMap 靠下面两个标记判断要不要真的发请求。
+   *  刻意不在外面再套一个"只执行一次"的开关 —— 那样这两个标记就永远走不到，
+   *  变成没人能验证的重复防线（用例也没法分辨哪一层在起作用）。 */
+  function bindBizTip() {
+    // 组件或脚本没到位（例如某个页面忘了引 biztip.js）时不该整页报错：
+    // 少一个悬停提示，不该把早盘总结本身弄挂。
+    if (typeof BizTip === "undefined" || typeof BizMap === "undefined") return;
+
+    BizTip.init({
+      // 返回 null = 目录里没有这家 / 映射还没到 → 卡片不出现（见文件头第 3 条）
+      get: function (sym) { return BizMap.of(state.biz, sym); }
+    });
+    warmBizMap();
+  }
+
+  /** 取一次映射数据。两个标记各管一件事，缺一个都会有肉眼看不出的浪费：
+   *    bizLoading —— 请求还在路上时又重跑了一次 render（切标签页很快），别发第二遍；
+   *    biz        —— 已经拿到之后每次 render 都别再取（426KB，页面还开着就一直重取）。 */
+  function warmBizMap() {
+    if (state.bizLoading || state.biz || !canHover()) return;
+    state.bizLoading = true;
+    fetch("/api/us-business-map", { cache: "no-store" })
+      .then(function (r) { return r.json(); })
+      .then(function (j) {
+        state.bizLoading = false;
+        // 旧版接口 / 读取失败：整块不启用。**不提示** —— 这一页的主体是复盘，
+        // 该说的话在明暗对照页的顶部黄条里（那边才是这个功能的归属地）。
+        if (!j || !j.ok || j.schema !== BizMap.SCHEMA) return;
+        state.biz = j;
+        // 表格与方块都是渲染时一次性拼好的，属性早就写在 HTML 里了，
+        // 所以数据到位**什么都不用重画** —— 下一次 mouseover 直接就能取到。
+      })
+      .catch(function () { state.bizLoading = false; });
+  }
+
   // ------------------------------------------------------------ 入口
 
   function render(d) {
@@ -1056,6 +1150,7 @@
     bindMoversTools();
     bindWatchlistTools();          // 关注池是独立面板，各自判断元素在不在，互不牵连
     renderWatchlist();
+    bindBizTip();                  // A 股映射的悬停提示（接线一次 + 预热取数，见上）
     // 自选票的行情不在日更数据里，进页面时补取一次。
     // 只取**还没拿到**的：服务端有 120 秒缓存，重复取也只是打缓存，但少一轮往返总是好的。
     var pending = state.wl.added.filter(function (c) { return !state.wlQuotes[c]; });

@@ -138,18 +138,27 @@ def main():
     # rows 也照样 4279 家，只是缺 industries/overrides —— 页面于是把每一行都渲染成
     # 「这家公司没有映射数据」，一个不报错的谎（数据一份不少地躺在磁盘上）。
     #
-    # 这个数字跨三处：server.BUSINESS_MAP_SCHEMA、static/linkage.js 的 BIZ_SCHEMA、
+    # 这个数字跨三处：server.BUSINESS_MAP_SCHEMA、static/bizmap.js 的 BizMap.SCHEMA、
     # 以及接口返回值。三处不一致时的症状同上（静默变空状态），所以钉住。
-    js_path = os.path.join(BASE_DIR, "static", "linkage.js")
-    with open(js_path, encoding="utf-8") as f:
-        js = f.read()
-    m = re.search(r"\bBIZ_SCHEMA\s*=\s*(\d+)", js)
-    check("linkage.js 里定义了 BIZ_SCHEMA", bool(m), "没找到 `var BIZ_SCHEMA = N`")
+    #
+    # 常量 2026-09-28 从 linkage.js 搬到了 bizmap.js —— 早盘总结页的悬停提示也要认
+    # 这个号（读同一份数据），两处各写一份迟早只剩一处是对的。所以现在除了比数值，
+    # 还要确认 linkage.js **没有**偷偷再存一份。
+    with open(os.path.join(BASE_DIR, "static", "bizmap.js"), encoding="utf-8") as f:
+        bizmap = f.read()
+    m = re.search(r"\bSCHEMA\s*=\s*(\d+)", bizmap)
+    check("bizmap.js 里定义了 SCHEMA", bool(m), "没找到 `B.SCHEMA = N`")
     if m:
-        check("前端 BIZ_SCHEMA 与服务端 BUSINESS_MAP_SCHEMA 一致",
+        check("前端 BizMap.SCHEMA 与服务端 BUSINESS_MAP_SCHEMA 一致",
               int(m.group(1)) == server.BUSINESS_MAP_SCHEMA,
               f"前端 {m.group(1)} / 服务端 {server.BUSINESS_MAP_SCHEMA}"
               " —— 改响应结构时两边要一起改")
+
+    with open(os.path.join(BASE_DIR, "static", "linkage.js"), encoding="utf-8") as f:
+        lk = f.read()
+    check("linkage.js 从 BizMap 取 schema，没有第二份副本",
+          "BizMap.SCHEMA" in lk and not re.search(r"\bBIZ_SCHEMA\s*=\s*\d", lk),
+          "它自己又写了一个数字 —— 两处独立演进的结果是接口换了版本而只有一处跟上")
 
     api = server.read_us_business_map()
     check("接口返回里带 schema", api.get("schema") == server.BUSINESS_MAP_SCHEMA,

@@ -188,10 +188,13 @@ function feed(watchlist) {
   return d;
 }
 
-/** 从渲染出来的方块里读代码顺序（含"取数中/失败"的占位格） */
+/** 从渲染出来的方块里读代码顺序（含"取数中/失败"的占位格）。
+ *  正则容忍 span 上的其它属性（`[^>]*`）—— 2026-09-28 给代码与公司名加了
+ *  data-biztip（A 股映射悬停用），写死成 `<span class="tile-code">` 的话
+ *  这里会**静默**匹配到 0 个，看着像"方块全没了"，其实是断言工具跟丢了。 */
 function tiles() {
-  return (wlHost.innerHTML.match(/<span class="tile-code">([^<]+)<\/span>/g) || [])
-    .map(s => s.replace(/^<span class="tile-code">|<\/span>$/g, "")).join(",");
+  return (wlHost.innerHTML.match(/<span class="tile-code"[^>]*>([^<]+)<\/span>/g) || [])
+    .map(s => (s.match(/>([^<]+)<\/span>/) || [])[1]).join(",");
 }
 /** 面板徽章上的只数 */
 function badge() { return els.wlCount.textContent; }

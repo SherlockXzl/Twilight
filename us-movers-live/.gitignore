@@ -9,6 +9,13 @@ __pycache__/
 data/*.json
 !data/.gitkeep
 
+# 「先写 .tmp 再 rename」的中间产物（night_fetch / morning_fetch / symbols
+# 都是这个写法）。**只在改名那一步失败时才会留在磁盘上** —— 比如进程被 kill、
+# 或者写操作被环境的文件策略拦下（2026-09-28 工具会话里跑服务时真的发生过：
+# os.replace 报 "Brokered host rename overwrite refused"）。
+# 上面那条 data/*.json 匹配不到它（后缀是 .json.tmp），所以必须单列。
+data/*.tmp
+
 # 覆盖写入前的备份（cp reasons.json reasons.json.bak.<时间戳>）。
 # 不匹配上面那条 data/*.json —— 它以时间戳结尾，所以单列一行。
 data/*.bak*
@@ -16,6 +23,11 @@ data/*.bak.*.tgz
 
 # 全档校验的按日缓存（morning_fetch.py 的 wide_scan 写；可丢，丢了就是重抓一遍）
 data/cache/
+
+# 自动化在**本目录**下写的工作记忆（定时任务以这里为工作目录跑，于是 .workbuddy/
+# 落在了仓库里面）。它是会变的运行状态、不是交付物，从来也没进过库 —— 单列一行
+# 免得每次 `git add -A` 都要手工挑出来（2026-09-28 差点就顺手提交了进去）。
+.workbuddy/
 
 # macOS
 .DS_Store

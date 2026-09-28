@@ -144,6 +144,10 @@ global.fetch = function (url) {
 /* ------------------------------------------------------------------ 加载页面 */
 
 eval(fs.readFileSync(ROOT + "static/util.js", "utf8"));
+// bizmap.js 必须排在 linkage.js 之前：bizOf() 现在是它的薄封装，
+// 而 BizMap.SCHEMA 也搬到那边去了（早盘总结页的悬停提示读同一份数据）。
+// 漏了这一行会报 "BizMap is not defined" —— 页面本身是好的，只有用例会炸。
+eval(fs.readFileSync(ROOT + "static/bizmap.js", "utf8"));
 eval(fs.readFileSync(ROOT + "static/mapbtn.js", "utf8"));
 global.BusinessMap = { render() { return "<div>渲染结果</div>"; } };   // 弹窗正文另有用例
 eval(fs.readFileSync(ROOT + "static/linkage.js", "utf8"));

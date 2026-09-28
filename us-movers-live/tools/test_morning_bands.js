@@ -180,10 +180,13 @@ function chipCounts() {
 function lit() {
   return Object.keys(BTN).filter(k => BTN[k].classList.contains("on")).join(",");
 }
-/** 表格里出现的代码（按渲染顺序） */
+/** 表格里出现的代码（按渲染顺序）。
+ *  正则容忍 td 上的其它属性（`[^>]*`）—— 2026-09-28 给代码格加了 data-biztip
+ *  （A 股映射悬停用），写死成 `<td class="code">` 的话这里会**静默**匹配到 0 行，
+ *  看着像"表格空了"，其实是断言工具自己跟丢了。 */
 function codes() {
-  return (els.mvTableHost.innerHTML.match(/<td class="code">([^<]+)<\/td>/g) || [])
-    .map(s => s.replace(/^<td class="code">|<\/td>$/g, "")).join(",");
+  return (els.mvTableHost.innerHTML.match(/<td class="code"[^>]*>([^<]+)<\/td>/g) || [])
+    .map(s => (s.match(/>([^<]+)<\/td>/) || [])[1]).join(",");
 }
 /** 板块下拉的候选项 */
 function sectorOpts() {
