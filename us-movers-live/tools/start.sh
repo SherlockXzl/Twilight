@@ -20,6 +20,11 @@
 set -u
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+#: 物理路径版本，只用于一件事：和 `lsof -d cwd` 给出来的工作目录比对。
+#: lsof 报的永远是**解析过符号链接**的路径，而 `pwd` 给的是逻辑路径 ——
+#: 两者不等时 stop_stale_server 会把手伸向自己的服务当成"别人的程序"而拒绝重启。
+#: 这是 fail-safe 的方向（不会误杀），但会让用户完全重启不了，所以两个都认。
+ROOT_PHYS="$(cd "$ROOT" && pwd -P)"
 PY=/Users/xuzhuoli/.workbuddy/binaries/python/versions/3.13.12/bin/python3
 CLOUDFLARED="$HOME/.local/bin/cloudflared"
 
@@ -27,18 +32,79 @@ ok()   { printf "  \033[32m✓\033[0m %s\n" "$1"; }
 bad()  { printf "  \033[31m✗\033[0m %s\n" "$1"; }
 step() { printf "\n\033[1m%s\033[0m\n" "$1"; }
 
+# ---------------------------------------------------------------- 重启开关
+#
+#   bash tools/start.sh            幂等启动：端口活着就跳过（默认）
+#   bash tools/start.sh --restart  先停掉在跑的旧进程，再用当前代码起
+#
+# 为什么必须有 --restart：本脚本默认不碰已经跑着的服务，所以
+# **"改了 server.py 再跑一次 start.sh"是没有任何效果的** —— 服务会一直是旧代码。
+# 2026-09-28 就是栽在这里：那天把 /api/us-business-map 的响应结构从"逐家展开"
+# 改成了"引用式三表"，前端也换新了，但服务进程从早上连续跑到下午一直没换过代码，
+# 期间每次"重启"都只打印一句"已经在运行，跳过"。页面的表现是**所有按钮变灰、
+# 点开说这家公司没有映射数据** —— 数据一份不少地躺在磁盘上，只是没人读得到。
+RESTART=0
+case "${1:-}" in
+  --restart|-r) RESTART=1 ;;
+  "")           ;;
+  *) echo "用法: bash tools/start.sh [--restart]"; exit 2 ;;
+esac
+
+# 停掉占用 8787 的**本项目**服务。
+# 只动确认是自己人的进程：先取监听 8787 的 pid，再核对它的工作目录就是本项目根目录。
+# 万一是别的程序占了 8787，报错退出，绝不盲杀。
+stop_stale_server() {
+  local pid cwd i
+  pid=$(lsof -nP -iTCP:8787 -sTCP:LISTEN -t 2>/dev/null | head -1)
+  if [ -z "$pid" ]; then
+    ok "没有在跑的服务"
+    return 0
+  fi
+  cwd=$(lsof -a -p "$pid" -d cwd -Fn 2>/dev/null | sed -n 's/^n//p' | head -1)
+  if [ "$cwd" != "$ROOT" ] && [ "$cwd" != "$ROOT_PHYS" ]; then
+    bad "8787 被别的程序占用（pid ${pid}，工作目录 ${cwd:-未知}）—— 不是本项目，不结束它"
+    return 1
+  fi
+  kill "$pid" 2>/dev/null || { bad "结束进程 ${pid} 失败"; return 1; }
+  # 等端口真正释放。kill 之后监听套接字可能还留一小会儿，
+  # 不等就起新进程会撞上 "Address already in use" —— 症状同样是"重启了但没变化"。
+  for i in $(seq 1 15); do
+    curl -s --noproxy '*' --max-time 1 http://127.0.0.1:8787/healthz >/dev/null 2>&1 || break
+    sleep 1
+  done
+  if curl -s --noproxy '*' --max-time 1 http://127.0.0.1:8787/healthz >/dev/null 2>&1; then
+    bad "旧进程（pid ${pid}）没停下来 —— 手动 kill 它再重试"
+    return 1
+  fi
+  ok "已停掉旧服务（pid ${pid}）"
+  return 0
+}
+
 step "① 看板服务（127.0.0.1:8787）"
-if curl -s --max-time 3 http://127.0.0.1:8787/healthz >/dev/null 2>&1; then
+if [ "$RESTART" = "1" ]; then
+  stop_stale_server || exit 1
+fi
+
+if curl -s --noproxy '*' --max-time 3 http://127.0.0.1:8787/healthz >/dev/null 2>&1; then
+  if [ "$RESTART" = "1" ]; then
+    # --restart 模式下还能走到这里，说明上面**没能**把它停掉
+    # （最可能是 lsof 列不出占用端口的进程）。这时候绝不能打印"跳过"就收工：
+    # 用户会以为代码换新了，实际还跑着旧的 —— 正是这个脚本今天要根治的那类假象。
+    bad "重启失败：8787 仍被占用，但没能识别出占用它的进程（lsof 看不到）"
+    bad "手动处理：lsof -nP -iTCP:8787 -sTCP:LISTEN 找到 pid，kill 掉，再跑一次本脚本"
+    exit 1
+  fi
   ok "已经在运行，跳过"
+  printf "  \033[33m!\033[0m %s\n" "注意：这不会重新加载 server.py。改了服务端代码要跑 bash tools/start.sh --restart"
 else
   cd "$ROOT" || exit 1
   nohup "$PY" server.py >> /tmp/us-movers-live.log 2>&1 &
   disown
   for _ in $(seq 1 20); do
     sleep 1
-    curl -s --max-time 2 http://127.0.0.1:8787/healthz >/dev/null 2>&1 && break
+    curl -s --noproxy '*' --max-time 2 http://127.0.0.1:8787/healthz >/dev/null 2>&1 && break
   done
-  if curl -s --max-time 3 http://127.0.0.1:8787/healthz >/dev/null 2>&1; then
+  if curl -s --noproxy '*' --max-time 3 http://127.0.0.1:8787/healthz >/dev/null 2>&1; then
     ok "已启动（日志 /tmp/us-movers-live.log）"
   else
     bad "起不来，看 /tmp/us-movers-live.log"

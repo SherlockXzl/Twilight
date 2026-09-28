@@ -18,9 +18,15 @@
  *      被整个滤空的板块还应该从下拉里消失、选中项回落。
  *   4. **override（公司级精写）与行业级两条路径都要算数。** 公司级精写的公司，
  *      即使它的行业在 A 股没有对标，也算"有 A 股映射"。
+ *   5. **接口是旧版时不许说"没有数据"**（第 8 节）。2026-09-28 真的踩到过：
+ *      server.py 换了响应结构而服务没重启，接口 200、rows 一个不少，
+ *      只是缺 industries/overrides —— 页面于是把每一行都渲染成
+ *      "这家公司没有映射数据"，而数据其实躺在磁盘上。这种情况必须点明
+ *      「服务需要重启」，否则用户会去重跑生成脚本，白忙一场。
  *
  * 做法与 tools/test_filters.js 一致：最小 DOM 桩 + 合成数据，不碰浏览器与真实 JSON。
- * 目录与映射两个请求的**到达顺序在这里是可控的**（这是第 2 条唯一能测的办法）。
+ * 目录与映射两个请求的**到达顺序在这里是可控的**（这是第 2 条唯一能测的办法）；
+ * 第 8 节则通过重新执行一遍页面脚本 + 换掉 fetch 来模拟"服务是旧代码"。
  */
 
 const fs = require("fs");
@@ -97,7 +103,12 @@ const CATALOG = {
 };
 
 const BIZ = {
-  ok: true, count: 5,
+  ok: true,
+  // schema 必须与 linkage.js 的 BIZ_SCHEMA、server.py 的 BUSINESS_MAP_SCHEMA 一致。
+  // 少了它，前端会把这份响应当成**旧版服务**（见第 8 节），一个映射都组不出来 ——
+  // fixture 不写全的话，前半篇断言会整片假失败。
+  schema: 2,
+  count: 5,
   rows: {
     AAPL: { name: "Apple Inc.", industryKey: "消费电子" },
     HIT: { name: "Hit Co.", industryKey: "半导体" },
@@ -261,6 +272,61 @@ function clickMapBtn(sym, name) {           // 模拟点某行的「点击查看
 
   checkTrue("渲染结果里没有 markdown 星号", table().indexOf("**") < 0);
   checkTrue("渲染结果里没有反引号", table().indexOf("`") < 0);
+
+  /* ================================================================ 8. 旧版接口
+     2026-09-28 实战踩到：server.py 把响应的结构从「逐家展开」改成「引用式三表」，
+     但运行中的服务进程没有重启（tools/start.sh 只认端口，见该脚本的注释），
+     于是前端拿到的还是旧结构 —— 接口照样 200、rows 也照样 4279 家，
+     缺的是 industries / overrides，而这两个正是 bizOf() 组装每条映射所必需的。
+
+     前端若照单全收，每一行的 bizOf() 都会返回 null，页面变成
+     「**全部按钮变灰、点开说这家公司没有映射数据**」—— 一个不抛任何异常的谎，
+     数据一份不少地躺在磁盘上。这一节盯的就是：这种情况必须说出真实原因，
+     并且给的下一步动作是「重启服务」，而不是「重新生成数据」。 */
+
+  section("8. 旧版接口（服务没重启）—— 说清原因，不许说「没有数据」");
+
+  global.fetch = function (url) {
+    const u = String(url);
+    if (u.indexOf("us-catalog") >= 0) {
+      return Promise.resolve({ json: () => Promise.resolve(CATALOG) });
+    }
+    if (u.indexOf("us-business-map") >= 0) {
+      // 旧版响应：只有 rows（且带 business 字段的逐家展开），没有 schema/industries/overrides
+      return Promise.resolve({ json: () => Promise.resolve({
+        ok: true, count: 5,
+        rows: { AAPL: { name: "Apple Inc.", business: "旧结构里的业务描述", peers: [] } }
+      }) });
+    }
+    return Promise.resolve({ json: () => Promise.resolve({}) });
+  };
+
+  // 重新跑一遍页面脚本：IIFE 每次执行都是全新的一份 state 与监听器
+  eval(fs.readFileSync(ROOT + "static/linkage.js", "utf8"));
+  await tick();
+  await tick();
+
+  checkTrue("页面顶部指出是服务端的问题，而不是数据的问题",
+    els.notice.innerHTML.indexOf("server.py") > 0);
+  checkTrue("页面顶部给出恢复命令", els.notice.innerHTML.indexOf("--restart") > 0);
+  checkTrue("页面顶部说明数据文件是新的（免得用户去重跑生成脚本）",
+    els.notice.innerHTML.indexOf("数据文件本身是新的") > 0);
+  checkTrue("按钮保持灰态（认不出映射）", table().indexOf("map-btn--none") > 0);
+  checkTrue("目录本身照常渲染", table().indexOf("Apple Inc.") > 0);
+
+  setBizOnly(true);
+  checkTrue("勾选该条件时**不**报「共 0 条」", info().indexOf("共 0 条") < 0);
+  checkTrue("勾选该条件时指向「服务需要重启」", table().indexOf("服务需要重启") > 0);
+  checkTrue("勾选该条件时不谎称没有数据", table().indexOf("没有数据") < 0);
+
+  clickMapBtn("AAPL", "Apple Inc.");
+  checkTrue("弹窗副标题点明是服务端代码旧",
+    openedModal.subtitle.indexOf("服务端还在跑旧代码") > 0);
+  checkTrue("弹窗正文说明数据没丢", openedModal.bodyHtml.indexOf("没有丢数据") > 0);
+  checkTrue("弹窗给出恢复命令",
+    openedModal.bodyHtml.indexOf("tools/start.sh --restart") > 0);
+  checkTrue("弹窗**不**沿用「没有它」那套（那是真的没数据时说的）",
+    openedModal.bodyHtml.indexOf("业务映射数据里没有它") < 0);
 
   /* ---------------------------------------------------------------- 汇总 */
 

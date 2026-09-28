@@ -131,6 +131,33 @@ def main():
     ratio = (d.get("covered") or 0) / max(1, d.get("count") or 1)
     check("有对标的家数占比 ≥ 90%", ratio >= 0.9, f"实际 {ratio:.1%}")
 
+    # ---------------------------------------------------------- 7. 接口版本握手
+    #
+    # `schema` 是「前端已是新版、服务进程还跑着旧代码」时**唯一**能认出错配的东西。
+    # 2026-09-28 真踩过：响应结构换成引用式三表后服务没重启，接口照样 200、
+    # rows 也照样 4279 家，只是缺 industries/overrides —— 页面于是把每一行都渲染成
+    # 「这家公司没有映射数据」，一个不报错的谎（数据一份不少地躺在磁盘上）。
+    #
+    # 这个数字跨三处：server.BUSINESS_MAP_SCHEMA、static/linkage.js 的 BIZ_SCHEMA、
+    # 以及接口返回值。三处不一致时的症状同上（静默变空状态），所以钉住。
+    js_path = os.path.join(BASE_DIR, "static", "linkage.js")
+    with open(js_path, encoding="utf-8") as f:
+        js = f.read()
+    m = re.search(r"\bBIZ_SCHEMA\s*=\s*(\d+)", js)
+    check("linkage.js 里定义了 BIZ_SCHEMA", bool(m), "没找到 `var BIZ_SCHEMA = N`")
+    if m:
+        check("前端 BIZ_SCHEMA 与服务端 BUSINESS_MAP_SCHEMA 一致",
+              int(m.group(1)) == server.BUSINESS_MAP_SCHEMA,
+              f"前端 {m.group(1)} / 服务端 {server.BUSINESS_MAP_SCHEMA}"
+              " —— 改响应结构时两边要一起改")
+
+    api = server.read_us_business_map()
+    check("接口返回里带 schema", api.get("schema") == server.BUSINESS_MAP_SCHEMA,
+          f"实际 {api.get('schema')!r}")
+    for field in ("rows", "industries", "overrides"):
+        check(f"接口透传了 {field}", field in api,
+              "少了它前端组不出映射，且**不会报错**（只会静默变成空状态）")
+
     print(f"检查 {checks} 项：rows {len(rows)} 家 / 行业 {len(industries)} 个 / "
           f"对标条目 {total_peers} 条 / 有对标 {d.get('covered')} 家"
           f"（{ratio:.1%}）")

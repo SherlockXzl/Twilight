@@ -62,10 +62,18 @@ REASONS_PATH = os.path.join(BASE_DIR, "data", "reasons.json")
 US_CATALOG_PATH = os.path.join(BASE_DIR, "data", "us_catalog.json")
 
 #: 「明暗对照」页「A 股公司业务映射」列的数据文件。
-#: 由 tools/build_us_business_map.py 生成（内容种子在那个脚本里）。
-#: **与目录分开一个文件、也分开一个接口**：目录 4279 行（gzip 后仍约 200KB），
-#: 这份只有几家、几 KB —— 合成一个接口会让每次打开页面都多搬一份用不到的数据。
+#: 由 tools/build_us_business_map.py 从 us_catalog.json 全量生成（内容种子在
+#: tools/bizmap_data.py 与 tools/bizmap_industries.py）。
+#: **与目录分开一个文件、也分开一个接口**：两者的更新节奏与用途都不同
+#: （目录十天半月重建一次；映射只在点开弹窗 / 勾选那个筛选时才用到），
+#: 合成一个接口会让每次打开页面都多搬一份当天用不上的数据。
 BUSINESS_MAP_PATH = os.path.join(BASE_DIR, "data", "us_business_map.json")
+
+#: 上面那份响应的**版本号**（前端 counterpart：static/linkage.js 的 BIZ_SCHEMA）。
+#: 改响应结构时两边一起改。它的用途见 read_us_business_map 的 docstring ——
+#: 一句话：让「前端已是新版、服务还跑着旧代码」这种错配能被**认出来**，
+#: 而不是伪装成「这家公司没有映射数据」。
+BUSINESS_MAP_SCHEMA = 2
 
 ET = ZoneInfo("America/New_York")
 CST = ZoneInfo("Asia/Shanghai")
@@ -199,6 +207,15 @@ def read_us_business_map():
     `note`（「列的是业务相似，不是供应关系」）也一并带出去 ——
     那句口径由 businessmap.js 渲染，不能丢在传输层，否则读者会把
     「业务相似」误读成「苹果的供应商」。
+
+    `schema` 是**版本握手**，不是可有可无的元数据（前端 counterpart 在
+    static/linkage.js 的 BIZ_SCHEMA）。改这块的响应结构时**必须**同时改它。
+
+    为什么值得单开一个字段：2026-09-28 这份响应从「逐家展开」改成「引用式三表」后，
+    服务进程没有重启（当时 tools/start.sh 只认端口，见该脚本注释），前端拿到的
+    还是旧结构 —— 只有 rows、没有 industries/overrides，于是 bizOf() 对每一行
+    都返回 null。页面的表现是「**所有按钮变灰、点开说这家公司还没有映射数据**」，
+    数据却一份不少地躺在磁盘上。这种错配**不抛任何异常**，只会让人以为数据没了。
     """
     if not os.path.exists(BUSINESS_MAP_PATH):
         return {"ok": False,
@@ -212,6 +229,7 @@ def read_us_business_map():
 
     rows = d.get("rows") or {}
     return {"ok": True,
+            "schema": BUSINESS_MAP_SCHEMA,
             "count": d.get("count") or len(rows),
             "covered": d.get("covered") or 0,
             "industryCount": d.get("industryCount") or 0,

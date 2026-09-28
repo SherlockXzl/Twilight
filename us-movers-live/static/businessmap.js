@@ -60,11 +60,11 @@
   B.render = function (entry) {
     if (!entry || !entry.business) {
       return '<div class="sm-empty">' +
-        "<p>这家公司还没有业务映射数据。</p>" +
-        '<p class="hint">目录里的公司都应有行业级说明，出现这一屏通常意味着这家' +
-        "不在 <code>data/us_catalog.json</code> 里（例如已退市或改了代码）。" +
-        "内容由 <b>tools/build_us_business_map.py</b> 生成后写入 " +
-        "<code>data/us_business_map.json</code>。</p>" +
+        "<p>目录里有这家公司，但业务映射数据里没有它。</p>" +
+        '<p class="hint">映射由 <b>tools/build_us_business_map.py</b> 从 ' +
+        "<code>data/us_catalog.json</code> 全量生成，正常应覆盖目录里的每一家 —— " +
+        "出现这一屏，多半是两侧不同步（重跑了目录却忘了重跑映射），跑一次那个脚本即可。" +
+        "另一种可能是这家已退市或改了代码。</p>" +
         "</div>";
     }
 

@@ -25,6 +25,14 @@
   //: 页数也不至于太多（43 页）。真要找某家公司，搜索比翻页快得多。
   var PAGE_SIZE = 100;
 
+  //: `/api/us-business-map` 响应的版本号，必须与服务端 server.py 的
+  //: BUSINESS_MAP_SCHEMA 一致。它的唯一用途是**认出旧版服务**
+  //: （前端已是新版、服务进程还跑着改动前的 server.py）——
+  //: 那种错配下接口照样 200、字段也照样有，只是缺了 industries/overrides，
+  //: 于是 bizOf() 对每一行都返回 null：页面表现为「全部按钮变灰、点开说没有映射数据」，
+  //: 而数据一份不少地躺在磁盘上。见 loadBizMap。
+  var BIZ_SCHEMA = 2;
+
   /* state 里三个「是否已就绪」的标志值得说明，它们都对应一个会骗人的默认值：
 
        catalogReady —— 目录到了没有。它在 renderBody 里做了守卫：目录是 202KB、
@@ -33,9 +41,12 @@
        biz          —— 映射数据（三张引用表）。null = 没拿到，非 null = 拿到了。
                         注意它**不是**「有没有 A 股映射」的判据，见 hasPeers。
        bizErr       —— 映射是不是"读取失败"。和"还在载入中"要分开说，
-                        否则失败时会一直显示"载入中"，用户会一直等。 */
+                        否则失败时会一直显示"载入中"，用户会一直等。
+       bizStale     —— 拿到的是**旧版接口的响应**（服务没重启）。它和"失败"要再分开：
+                        数据其实是好的，只是服务端代码旧了，用户重启一下就好 ——
+                        这条提示要能直接告诉他做什么，而不是让他以为数据丢了。 */
   var state = { q: "", sector: "", industry: "", rows: [], meta: null, page: 1,
-                biz: null, bizErr: "", bizOnly: false, catalogReady: false };
+                biz: null, bizErr: "", bizStale: false, bizOnly: false, catalogReady: false };
 
   // ------------------------------------------------------------ 过滤
 
@@ -121,6 +132,20 @@
    *  内容由 businessmap.js 渲染（与夜盘页的 sharemap.js 是两套口径，见该文件注释）。 */
   function openBizMap(symbol, name) {
     var e = bizOf(symbol);
+
+    /* 「查不到这家」有两种截然不同的原因，给的下一步动作也完全不同：
+         数据真没有      → 说明数据从哪来、要跑哪个脚本（BusinessMap 的空状态）；
+         接口是旧版      → 数据有，是服务端代码旧了，重启即可。
+       混成一种的话，明明只要重启就能好的事，会被当成"数据没生成"去重跑脚本。 */
+    if (!e && state.bizStale) {
+      Modal.open({
+        title: (name ? name + "（" + symbol + "）" : symbol) + " · A 股公司业务映射",
+        subtitle: "数据没有丢 —— 是服务端还在跑旧代码",
+        bodyHtml: staleHtml()
+      });
+      return;
+    }
+
     var n = e ? e.peers.length : 0;
     Modal.open({
       title: (name ? name + "（" + symbol + "）" : symbol) + " · A 股公司业务映射",
@@ -129,6 +154,21 @@
                    : "所属行业在 A 股无直接对标"),
       bodyHtml: BusinessMap.render(e)
     });
+  }
+
+  /* 旧版服务时的弹窗内容。
+     刻意写成「怎么修」而不是「没有数据」—— 这时候 rows 里其实有 4279 家，
+     只是 industries / overrides 没随响应传过来。 */
+  function staleHtml() {
+    return '<div class="sm-empty">' +
+      "<p>这一列<b>没有丢数据</b> —— 是服务端返回的接口结构还是旧版，页面认不出来，" +
+      "所以每一行都查不到映射。</p>" +
+      '<p class="hint">常见原因是改了 <b>server.py</b> 却没有重启服务：Python 进程在启动时' +
+      "就把代码读进了内存，之后改文件不会生效（静态文件不用重启，服务端要）。</p>" +
+      '<p class="hint">恢复办法：在项目目录执行 <b>bash tools/start.sh --restart</b>' +
+      "（或双击 tools/restart.command），然后刷新本页。" +
+      "数据文件 data/us_business_map.json 本身是好的，不用重新生成。</p>" +
+      "</div>";
   }
 
   /** 五列：代码 / 公司全称 / 板块 / 行业 / A 股公司业务映射。
@@ -160,11 +200,16 @@
 
     /* 勾了「只看有 A 股映射」但映射数据还没到 —— 如实说"载入中"，
        不要渲染成"共 0 条"。那 4047 家是存在的，只是这份数据还没到手，
-       报成 0 条会把"没加载"说成"没有"。 */
+       报成 0 条会把"没加载"说成"没有"。
+
+       三种原因分开说：还在载入 / 读取失败 / 接口是旧版（服务没重启）。
+       最后一种最容易被误读成"数据丢了"，所以要直接点出「需要重启」。 */
     if (state.bizOnly && !state.biz) {
-      $("tableHost").innerHTML = '<div class="empty">' + (state.bizErr
-        ? "A 股映射数据读取失败，无法按此条件筛选：" + U.esc(state.bizErr)
-        : "A 股映射数据载入中…") + "</div>";
+      var why;
+      if (!state.bizErr) why = "A 股映射数据载入中…";
+      else if (state.bizStale) why = "A 股映射接口是旧版，服务需要重启，暂时无法按此条件筛选";
+      else why = "A 股映射数据读取失败，无法按此条件筛选：" + U.esc(state.bizErr);
+      $("tableHost").innerHTML = '<div class="empty">' + why + "</div>";
       $("rowInfo").textContent = "—";
       $("pager").innerHTML = "";
       return;
@@ -379,6 +424,20 @@
      失败时**不留空**：把原因写进 state.bizErr。页面主体照常显示（这一列灰着即可），
      但如果用户勾了「只看有 A 股映射」，表格会如实说是"读取失败"还是"载入中" ——
      两者的等待方式不一样，混成一个"载入中"会让人一直等下去。 */
+  /* 服务端还是旧代码（改了 server.py 但进程没重启）时的处理。
+     接口照样 200、rows 也照样有，只是缺了 industries / overrides ——
+     前端因此**没法**渲染出任何一条映射，但绝不能把这说成「没有数据」：
+     数据文件是新的，一行都没丢。页面上如实说明原因 + 给出恢复办法。 */
+  function noteStaleBizMap(got) {
+    state.bizStale = true;
+    state.bizErr = "接口版本不匹配（服务端 schema=" +
+                   (got === undefined || got === null ? "无" : got) +
+                   "，页面需要 " + BIZ_SCHEMA + "）";
+    showNotice("A 股映射接口返回的是旧结构 —— 服务进程还在跑改动前的 server.py。" +
+      "数据文件本身是新的，重启服务即可恢复：在项目目录执行 bash tools/start.sh --restart");
+    renderBody();     // 勾选着那个条件时，把表格的提示也换成这条
+  }
+
   function loadBizMap() {
     return fetch("/api/us-business-map", { cache: "no-store" })
       .then(function (r) { return r.json(); })
@@ -388,8 +447,19 @@
           renderBody();
           return;
         }
+        /* 版本握手。`j.schema` 缺失 = 服务端还是加这个字段之前的版本 ——
+           接口照样 200、rows 也照样 4279 家，缺的是 industries/overrides，
+           而这正是 bizOf() 组装每条映射所必需的。若放任不管，下面会
+           `state.biz = j`，然后每一行的 bizOf() 都返回 null，
+           页面变成"全部按钮变灰、点开说没有映射数据" —— 一个不报错的谎。
+           这里提前拦住，并明确告诉用户该做什么。 */
+        if (j.schema !== BIZ_SCHEMA) {
+          noteStaleBizMap(j.schema);
+          return;
+        }
         state.biz = j;    // 三张表整包存下，展开成单条交给 bizOf
         state.bizErr = "";
+        state.bizStale = false;
         renderFilters();  // 板块/行业的计数要跟着"只看有 A 股映射"重算
         renderBody();     // 按钮态从"灰"变"可点"，勾选时到这里才真正筛出结果
       })

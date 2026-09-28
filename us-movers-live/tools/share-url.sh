@@ -50,7 +50,7 @@ else
 fi
 
 echo "── 本地服务 ─────────────────────────────"
-if curl -s --max-time 5 "http://127.0.0.1:8787/healthz" >/dev/null 2>&1; then
+if curl -s --noproxy '*' --max-time 5 "http://127.0.0.1:8787/healthz" >/dev/null 2>&1; then
   ok "8787 在监听"
 else
   bad "8787 无响应 —— 服务没起来（bash tools/start.sh）"

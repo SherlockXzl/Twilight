@@ -112,12 +112,17 @@ checkTrue("未传 texts 时用默认文案",
 
 section("2. 没有数据时的弹窗内容");
 
+/* 空状态说的是「两侧数据不同步」，不是「这家公司没有数据」——
+   全量铺满 4279 家之后，后者已经不是可能的原因了；而真的取不到映射时
+   （接口是旧版 / 读取失败）linkage.js 会先拦下，不会走到这里。
+   所以这里的文案要能指对方向：重跑生成脚本，不是去查这家公司。 */
 ["null", "空对象", "缺 business"].forEach(function (label, i) {
   const arg = [null, {}, { peers: [peer()] }][i];
   const html = B.render(arg);
-  checkTrue(label + "：给出说明而不是空白", html.indexOf("还没有业务映射数据") > 0);
+  checkTrue(label + "：给出说明而不是空白", html.indexOf("业务映射数据里没有它") > 0);
   checkTrue(label + "：指明数据由哪个脚本生成",
     html.indexOf("build_us_business_map.py") > 0);
+  checkTrue(label + "：说清多半是两侧数据不同步", html.indexOf("不同步") > 0);
   checkTrue(label + "：不渲染候选区", html.indexOf("bm-peer") < 0);
 });
 
