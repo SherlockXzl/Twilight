@@ -83,6 +83,7 @@ run "早盘全档校验（提前退出 / 阈值 / 缓存）" "$PY" tools/test_wi
 run "夜盘标签页：点击反馈与跨页记忆" "$NODE" tools/test_evening_tabs.js
 run "夜盘 A 股映射（列 · 弹窗内容 · 组件）" "$NODE" tools/test_sharemap.js
 run "明暗对照 A 股业务映射（列 · 弹窗 · 折叠）" "$NODE" tools/test_businessmap.js
+run "明暗对照「只看有 A 股映射」（口径 / 载入态 / 计数）" "$NODE" tools/test_linkage_bizfilter.js
 run "明暗对照映射数据（与目录同源 / 引用完整）" "$PY" tools/test_business_map_data.py
 run "驱动原因 / A 股映射（字段透传）" "$PY"   tools/test_reasons.py
 run "外壳：轮询调度与页头"           "$NODE" tools/test_polling.js

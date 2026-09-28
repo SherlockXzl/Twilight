@@ -27,6 +27,12 @@
       <input type="search" id="q" placeholder="搜索代码 / 公司 / 板块 / 行业…">
       <div id="sectorSel" class="combo"></div>
       <div id="industrySel" class="combo"></div>
+      <!-- 「只看有 A 股映射」：只留在 A 股有对标公司的美股。
+           口径是 peers 非空，不是"有映射数据" —— 全市场 4279 家都有行业说明，
+           但其中两百多家所属行业在 A 股没有对标，点开看不到任何 A 股公司。 -->
+      <label class="chk" title="只显示在 A 股有对标公司的美股；所属行业在 A 股没有对标的会隐藏">
+        <input type="checkbox" id="bizOnly"><span>只看有 A 股映射</span>
+      </label>
       <span class="hint" id="rowInfo"></span>
     </div>
 

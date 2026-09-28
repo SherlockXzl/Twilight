@@ -177,6 +177,18 @@ button:disabled:hover{border-color:var(--line)}
 input[type=search]{font:inherit;font-size:var(--fs-3);padding:8px 14px;border:1px solid var(--line);
   border-radius:8px;background:var(--card);min-width:260px;color:var(--ink)}
 
+/* ---------- 开关型筛选（明暗对照页「只看有 A 股映射」）----------
+   与旁边的下拉/搜索框同一行，所以上下留一点 padding 让视觉高度对齐
+   （下拉的 padding 是 8px + 1px 边框）。未勾选时用次要灰，勾上才是正文色 ——
+   和 .combo 的"没筛是灰、筛了是黑"是同一套视觉语言。 */
+.chk{display:flex;align-items:center;gap:7px;padding:8px 2px;
+  font-size:var(--fs-3);color:var(--ink3);cursor:pointer;user-select:none}
+.chk:hover{color:var(--ink2)}
+.chk input{width:15px;height:15px;margin:0;cursor:pointer;accent-color:var(--blue);flex:0 0 auto}
+/* 勾上才转正文色。用相邻兄弟选择器而不是 :has() —— 兼容面更宽，
+   而 HTML 结构就是 input + span 两个兄弟节点。 */
+.chk input:checked + span{color:var(--ink)}
+
 /* ---------- 带搜索的下拉（组件见 combo.js）----------
    原生 <select> 不支持在选项里输入搜索，所以自己实现：按钮 + 浮层（搜索框 + 选项列表）。 */
 .combo{position:relative;flex:0 1 auto;width:190px}
