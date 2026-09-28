@@ -190,7 +190,12 @@ def read_us_business_map():
     （那边是**事件驱动**的映射，输入是代码 + 驱动原因），数据也分开存，
     唯一共用的东西是那个「点击查看」按钮（static/mapbtn.js）。
 
-    服务端**只做搬运**：`rows` 原样透传（键是美股代码）。
+    服务端**只做搬运**，组装交给前端（static/linkage.js 的 bizOf）：
+    `rows` / `overrides` / `industries` 三张表原样透传 —— 数据是**引用式**存储的，
+    4279 行的 `rows` 只记「这家是谁、归哪个行业」，行业说明与对标列表放在
+    144 条的 `industries` 里共享。这里若替前端展开成逐家完整对象，
+    同一条行业说明会被复制 4279 遍，文件从 426 KB 涨到十几 MB。
+
     `note`（「列的是业务相似，不是供应关系」）也一并带出去 ——
     那句口径由 businessmap.js 渲染，不能丢在传输层，否则读者会把
     「业务相似」误读成「苹果的供应商」。
@@ -207,10 +212,14 @@ def read_us_business_map():
 
     rows = d.get("rows") or {}
     return {"ok": True,
-            "count": len(rows),
+            "count": d.get("count") or len(rows),
+            "covered": d.get("covered") or 0,
+            "industryCount": d.get("industryCount") or 0,
             "builtAt": d.get("builtAt") or "",
             "source": d.get("source") or "",
             "note": d.get("note") or "",
+            "overrides": d.get("overrides") or {},
+            "industries": d.get("industries") or {},
             "rows": rows}
 
 

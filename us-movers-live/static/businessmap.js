@@ -15,7 +15,16 @@
  * 支持 Ctrl+F 搜索折叠内容，且**不需要维护"哪个展开了"的状态** ——
  * 弹窗是 innerHTML 一次性注入的，自己实现就得额外绑事件、还要处理重绘。
  *
- * 数据由 tools/build_us_business_map.py 生成（种子内容在那个脚本里，见其注释）。
+ * 数据由 tools/build_us_business_map.py 生成（内容种子在 tools/bizmap_data.py
+ * 与 tools/bizmap_industries.py 里，见那两个文件的注释）。
+ *
+ * 「业务」那一段有两种来源，靠 entry.scope 区分
+ * --------------------------------------------
+ *   公司级（scope = "company"）：这家公司自己的业务，人工精写，目前只覆盖少数公司。
+ *   行业级（scope = "industry"）：所属行业的说明，**同行业所有美股共用一段**。
+ * 全量 4279 家里绝大多数是小盘股，没有可靠的中文资料可写 —— 逐家编造业务描述
+ * 比不给更糟，所以行业级是默认值，并在弹窗里明确标注，避免读者把它当成
+ * "这家公司自己的业务介绍"（一家小盘股和行业龙头会看到同样一段话）。
  */
 (function (w) {
   "use strict";
@@ -44,22 +53,37 @@
       "</details>";
   }
 
-  /** 数据 → 弹窗 body 的 HTML。 */
+  /** 数据 → 弹窗 body 的 HTML。
+   *  entry.scope 决定「业务」那一段是什么：
+   *    company  —— 这家公司自己的业务（人工精写，见 OVERRIDES）
+   *    industry —— 行业级说明，**同行业所有美股共用一段**（全量覆盖时的默认值） */
   B.render = function (entry) {
     if (!entry || !entry.business) {
       return '<div class="sm-empty">' +
         "<p>这家公司还没有业务映射数据。</p>" +
-        '<p class="hint">目前只覆盖了部分美股公司（先做的是「七姐妹」）。' +
+        '<p class="hint">目录里的公司都应有行业级说明，出现这一屏通常意味着这家' +
+        "不在 <code>data/us_catalog.json</code> 里（例如已退市或改了代码）。" +
         "内容由 <b>tools/build_us_business_map.py</b> 生成后写入 " +
-        "<code>data/us_business_map.json</code> —— 要加公司改那个脚本再重跑，" +
-        "它会顺带核对 A 股代码与行业。</p>" +
+        "<code>data/us_business_map.json</code>。</p>" +
         "</div>";
     }
 
+    var isInd = entry.scope === "industry";
     var out = [];
 
-    out.push('<h3 class="sm-h bm-first">公司业务</h3>');
+    out.push('<h3 class="sm-h bm-first">' + (isInd ? "行业定位" : "公司业务") +
+      (isInd && entry.industryLabel
+        ? '<span class="sm-legend">' + B.esc(entry.industryLabel) + " · 行业级说明</span>"
+        : "") +
+      "</h3>");
     out.push('<p class="bm-biz-main">' + B.esc(entry.business) + "</p>");
+
+    /* 这句必须写。行业说明是同一行业所有美股共用的一段 —— 一家小盘股和行业龙头
+       点开会看到同样的话。不说清楚，读者会把它当成"这家公司自己的业务介绍"。 */
+    if (isInd) {
+      out.push('<p class="bm-note">以上是该公司<b>所属行业</b>的说明，同行业的美股共用一段，' +
+        "不是这家公司自己的业务介绍。</p>");
+    }
 
     var peers = entry.peers || [];
     if (peers.length) {
@@ -71,6 +95,9 @@
          光看公司名和行业标签是看不出来的。 */
       out.push('<p class="bm-note">以上按「业务相似」筛选，属同赛道对标，' +
         "不代表存在供应链、客户或股权关系。</p>");
+    } else if (isInd) {
+      out.push('<p class="bm-note">A 股暂无该行业的直接对标标的 —— ' +
+        "具体原因已写在上面这段行业说明里，这里不做凑数式的类比。</p>");
     } else {
       out.push('<p class="bm-note">这家公司还没有对标的 A 股公司。</p>');
     }

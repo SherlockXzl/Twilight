@@ -20,7 +20,7 @@
   //: 页数也不至于太多（43 页）。真要找某家公司，搜索比翻页快得多。
   var PAGE_SIZE = 100;
 
-  var state = { q: "", sector: "", industry: "", rows: [], meta: null, page: 1, biz: {} };
+  var state = { q: "", sector: "", industry: "", rows: [], meta: null, page: 1, biz: null };
 
   // ------------------------------------------------------------ 过滤
 
@@ -38,18 +38,45 @@
 
   // ------------------------------------------------------------ 渲染
 
-  /* 「A 股公司业务映射」列的数据：GET /api/us-business-map（按需取，见 loadBizMap）。
-     键是美股代码，值形如 { name, business, peers: [...] }。 */
+  /* 「A 股公司业务映射」列的数据：GET /api/us-business-map（进页面取一次，见 loadBizMap）。
+
+     接口给的是**三张引用式表**，不是逐家展开的完整对象：
+       rows       { 美股代码: { name, industryKey } }   4279 家
+       industries { 行业名:   { zh, desc, peers } }     144 条
+       overrides  { 美股代码: { business, peers } }     个别精写
+     同一条行业说明只存一份。组装放在前端做 —— 服务端替前端展开的话，
+     144 条说明会被复制成 4279 份，接口体积从几百 KB 涨到十几 MB。
+
+     返回 null = 目录里没有这家。返回对象里 peers 可能为空（所属行业在 A 股
+     没有对标），那种情况弹窗**仍有内容**（行业说明），所以按钮不该画成灰的。 */
   function bizOf(symbol) {
-    return state.biz[(symbol || "").toUpperCase()] || null;
+    var b = state.biz;
+    if (!b) return null;
+    var sym = (symbol || "").toUpperCase();
+    var row = (b.rows || {})[sym];
+    if (!row) return null;
+
+    var ov = (b.overrides || {})[sym];
+    if (ov) {                        // 公司级精写优先于行业级
+      return { name: row.name, scope: "company",
+               business: ov.business, peers: ov.peers || [] };
+    }
+    var ind = (b.industries || {})[row.industryKey];
+    if (!ind) return null;
+    return { name: row.name, scope: "industry",
+             business: ind.desc, industryLabel: ind.zh, peers: ind.peers || [] };
   }
 
-  /** 最后一列的按钮 —— 与夜盘页共用 static/mapbtn.js，只差 title 措辞。 */
+  /** 最后一列的按钮 —— 与夜盘页共用 static/mapbtn.js，只差 title 措辞。
+   *  注意 has 单独传：peers 为 0 但行业说明存在时，按钮仍应是可点的正常态。 */
   function mapBtn(symbol, name) {
     var e = bizOf(symbol);
-    var n = (e && e.peers) ? e.peers.length : 0;
+    var n = e ? e.peers.length : 0;
+    var label = (e && e.industryLabel) ? e.industryLabel : "该行业";
     return MapBtn.html(symbol, name, n, {
-      title: "查看 " + n + " 家业务相似的 A 股公司",
+      has: !!e,
+      title: n ? "查看 " + n + " 家业务相似的 A 股公司"
+               : "查看行业说明（" + label + "在 A 股无直接对标）",
       empty: "还没有业务映射数据"
     });
   }
@@ -58,10 +85,12 @@
    *  内容由 businessmap.js 渲染（与夜盘页的 sharemap.js 是两套口径，见该文件注释）。 */
   function openBizMap(symbol, name) {
     var e = bizOf(symbol);
-    var n = (e && e.peers) ? e.peers.length : 0;
+    var n = e ? e.peers.length : 0;
     Modal.open({
       title: (name ? name + "（" + symbol + "）" : symbol) + " · A 股公司业务映射",
-      subtitle: n ? "业务相似 " + n + " 家 · 点任意一行展开业务描述" : "尚未生成",
+      subtitle: !e ? "尚未生成"
+              : (n ? "业务相似 " + n + " 家 · 点任意一行展开业务描述"
+                   : "所属行业在 A 股无直接对标"),
       bodyHtml: BusinessMap.render(e)
     });
   }
@@ -271,16 +300,16 @@
   }
 
   /* 「A 股公司业务映射」列的数据 —— 单独一个接口，**与目录分开取**：
-     目录有 4279 行（gzip 后仍约 200KB），而这份映射目前只有几家、几 KB。
-     合成一个接口会让每次打开页面都多搬一份用不到的数据。
-     映射内容的变化比目录慢得多（加了公司才变），所以进页面取一次即可，
-     不跟翻页/筛选走。拿不到就整列灰着，不影响目录表本身。 */
+     两者的更新节奏不同（目录十天半月重建一次，映射要改脚本才变），用途也不同
+     （目录是页面主体，映射只在点开弹窗时才用到）。合成一个接口会让每次
+     打开页面都多搬一份当天用不上的数据。
+     进页面取一次即可，不跟翻页 / 筛选走 —— 拿不到就整列灰着，不影响目录表本身。 */
   function loadBizMap() {
     return fetch("/api/us-business-map", { cache: "no-store" })
       .then(function (r) { return r.json(); })
       .then(function (j) {
         if (!j || !j.ok) return;
-        state.biz = j.rows || {};
+        state.biz = j;    // 三张表整包存下，展开成单条交给 bizOf
         renderBody();     // 按钮态从"灰"变"可点"，需要重画一次
       })
       .catch(function () { /* 静默：这一列不是页面的主体 */ });

@@ -11,9 +11,11 @@
  *      公司名和行业标签是看不出来的，没人会怀疑。
  *   2. **默认必须折叠**。四五个业务描述全展开的话，弹窗比正文还长，
  *      「先扫一遍有哪几家、再挑着看」这个用法就没了。
- *   3. **按钮的两态**（有数据 / 无数据）在两页之间必须一致：
- *      数据在明暗对照页只有 7 家，其余 4000 多行都是灰按钮 ——
- *      如果哪天被改成 disabled，用户就再也看不到"为什么没有、要跑哪个脚本"。
+ *   3. **按钮的两态**（有内容 / 没内容）在两页之间必须一致：
+ *      夜盘页没分析过的票是灰按钮，明暗对照页则是全市场铺满 —— 但「铺满」的形态是
+ *      **行业级说明**（同行业美股共用一段），不是逐家精写。所以 peers 为 0 时
+ *      也可能有内容可看（所属行业在 A 股没有对标），按钮不该画成灰的。
+ *      这条靠 MapBtn 的 texts.has 区分，下面有用例盯着。
  *   4. **纯文本渲染**。业务描述是中文长句，混进 markdown 星号会原样显示成星号
  *      （今天在驱动原因和这里各踩过一次）。
  *
@@ -151,6 +153,65 @@ checkTrue("带口径说明：业务相似 ≠ 供应关系",
 
 checkTrue("没有 peers 时给出提示而不是空列表",
   B.render({ symbol: "X", business: "某业务" }).indexOf("还没有对标的 A 股公司") > 0);
+
+/* ================================================================== 3b. 行业级 */
+
+section("3b. 行业级说明（全量覆盖时的默认形态）");
+
+/* 全量 4279 家里绝大多数是小盘股，没有可靠的中文资料 —— 它们拿到的
+   不是公司自己的业务描述，而是**所属行业**的说明，同行业共用一段。
+   弹窗必须把这件事说明白，否则读者会把"小盘股"和"行业龙头"的同一段话
+   当成两家各自的公司介绍。 */
+const IND = {
+  symbol: "AEIS", name: "Advanced Energy Industries Inc",
+  scope: "industry", industryLabel: "电气设备与部件",
+  business: "生产输配电与电气控制设备的企业，产品含开关柜、变压器与继电保护装置。",
+  peers: [peer({ code: "600406", name: "国电南瑞", industry: "电网设备" })]
+};
+
+{
+  const h = B.render(IND);
+  checkTrue("标题是「行业定位」而不是「公司业务」", h.indexOf("行业定位") > 0);
+  checkTrue("标题旁标出行业名", h.indexOf("电气设备与部件") > 0);
+  checkTrue("标题旁标明是行业级说明", h.indexOf("行业级说明") > 0);
+  checkTrue("明说「同行业的美股共用一段」", h.indexOf("同行业的美股共用一段") > 0);
+  checkTrue("行业级同样渲染对标列表", h.indexOf("bm-peer") > 0);
+  checkTrue("行业级不出现「公司业务」这个标题", h.indexOf(">公司业务<") < 0);
+}
+
+{
+  const h = B.render({
+    symbol: "X", scope: "industry", industryLabel: "烟草",
+    business: "中国烟草实行专卖制度且未整体上市，A 股暂无同类标的。", peers: []
+  });
+  checkTrue("行业无对标：说明 A 股暂无直接标的",
+    h.indexOf("A 股暂无该行业的直接对标标的") > 0);
+  checkTrue("行业无对标：不沿用「这家公司还没有对标」的旧文案",
+    h.indexOf("这家公司还没有对标的 A 股公司") < 0);
+  checkTrue("行业无对标：不渲染空的列表容器", h.indexOf("bm-list") < 0);
+}
+
+{
+  const h = B.render(FULL);   // FULL 没有 scope，按公司级处理
+  checkTrue("缺 scope 时按公司级处理（向后兼容）", h.indexOf("公司业务") > 0);
+  checkTrue("公司级不出现行业级标注", h.indexOf("行业级说明") < 0);
+}
+
+/* MapBtn 的 texts.has：peers 为 0 但仍有内容可看的场合。
+   明暗对照页全量铺满后会大量出现这种行（所属行业在 A 股没有对标），
+   画成灰按钮等于告诉用户"数据没生成"。 */
+{
+  const b = MapBtn.html("X", "X公司", 0, {
+    has: true, title: "查看行业说明（烟草在 A 股无直接对标）"
+  });
+  checkTrue("has=true 且 0 条：不是灰态", b.indexOf("map-btn--none") < 0);
+  checkTrue("has=true 且 0 条：用传入的 title", b.indexOf("查看行业说明") > 0);
+  checkTrue("has=true 且 0 条：仍然可点", b.indexOf("disabled") < 0);
+
+  const b2 = MapBtn.html("X", "X公司", 0, {});
+  checkTrue("不传 has 时仍按条数推断（夜盘页的老行为）",
+    b2.indexOf("map-btn--none") > 0);
+}
 
 /* ================================================================== 4. 纯文本与转义 */
 

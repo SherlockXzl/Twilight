@@ -15,232 +15,225 @@
 ⚠️ 列出来的是**业务相似**（同赛道对标），**不是供应链或股权关系**。
 两者混看会得出错误结论，弹窗里也写明了这一点。
 
-为什么内容硬编码在脚本里
-------------------------
-data/*.json 不入库（.gitignore），所以只留 JSON 的话换台机器就没了。
-把种子内容放在这个脚本里，仓库就自带可重建的内容源；
-后续要加公司，改这里的 PEERS 再重跑即可（也可以在 JSON 上手改，
-但那样下次重跑会被覆盖 —— 以 JSON 为准时请同步更新本脚本）。
+内容从哪来
+----------
+本脚本只管**逻辑**，内容种子在两个文件里（`data/*.json` 不入库，
+只留 JSON 的话换台机器就没了，所以种子必须进仓库）：
 
-A 股公司的行业分类与代码都经过 data/a_share_sectors.json（东财导出）核对：
-清单里查不到的代码一律不用 —— 那种"看着对"的代码最容易悄悄写错。
+    tools/bizmap_data.py        A_POOL：A 股公司池（代码 → 业务描述）
+    tools/bizmap_industries.py  INDUSTRIES：Finviz 行业 → 行业说明 + A 股对标
+                                OVERRIDES：个别公司的人工精写（七姐妹）
+
+层级：OVERRIDES（公司级） > INDUSTRIES（行业级）。
+4279 家里绝大多数是小盘股，没有可靠的中文资料，逐家编造业务描述比不给更糟；
+所以行业级说明是**预期行为**，弹窗里会标明这一点。要精写某家公司，加进 OVERRIDES。
+
+校验（不合格就不写文件）
+------------------------
+1. A 股代码 ↔ 名称 ↔ 行业 一律以 `data/a_share_sectors.json`（东财导出）为准 ——
+   池子里的代码在这份清单里查不到就报错，绝不"看着对就写"。
+2. INDUSTRIES / OVERRIDES 引用的每个代码，必须先在 A_POOL 里注册过。
+3. `data/us_catalog.json` 里出现过的行业，INDUSTRIES 必须全部覆盖 ——
+   key 写错（大小写、`&`、连字符）不会报错，只会让整个行业的公司悄悄退回"没有映射"，
+   页面上看不出任何异常，所以这里**直接报错退出**，不允许静默漏掉。
+
+基金 / SPAC 空壳的过滤口径**复用 server._FUND_INDUSTRY_KEYS**，不另抄一份 ——
+两处各存一份，改了一处另一处不动，页面上显示的家数就会和这里对不上。
 """
 
 import json
 import os
+import sys
 from datetime import datetime, timezone, timedelta
 
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, BASE_DIR)
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
+import server            # noqa: E402  只复用 _FUND_INDUSTRY_KEYS（过滤口径的唯一来源）
+import taxonomy_zh       # noqa: E402
+from bizmap_data import A_POOL            # noqa: E402
+from bizmap_industries import INDUSTRIES, OVERRIDES   # noqa: E402
+
 CST = timezone(timedelta(hours=8))
-OUT = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-                   "data", "us_business_map.json")
+OUT = os.path.join(BASE_DIR, "data", "us_business_map.json")
+A_SHARE_PATH = os.path.join(BASE_DIR, "data", "a_share_sectors.json")
+CATALOG_PATH = os.path.join(BASE_DIR, "data", "us_catalog.json")
 
-# ---------------------------------------------------------------- 七姐妹（用户指定先试这 7 家）
-
-ROWS = {
-    "AAPL": {
-        "name": "Apple Inc.",
-        "business": "全球消费电子龙头。硬件是 iPhone / Mac / iPad / Apple Watch / AirPods，"
-                    "服务是 App Store、iCloud、Apple Music 等订阅与抽成；自研 M 系与 A 系芯片、"
-                    "把 AI 能力放到端侧运行，是它区别于纯代工组装厂商的地方。",
-        "peers": [
-            {"code": "002475", "name": "立讯精密", "industry": "消费电子",
-             "business": "从连接器起家，现为消费电子精密零组件与整机组装的主要厂商之一，"
-                         "业务覆盖连接器、声学器件、无线充电、可穿戴设备组装等。"},
-            {"code": "601138", "name": "工业富联", "industry": "消费电子",
-             "business": "通信及电子设备的智能制造代工龙头，业务含消费电子精密结构件"
-                         "与云／AI 服务器整机代工，是产业链里体量最大的制造环节。"},
-            {"code": "002241", "name": "歌尔股份", "industry": "消费电子",
-             "business": "声学器件与智能硬件厂商，业务含智能声学整机、VR/AR 整机代工"
-                         "与精密零组件，智能硬件已占其营收近半。"},
-            {"code": "300433", "name": "蓝思科技", "industry": "消费电子",
-             "business": "消费电子外观结构件与功能件厂商，主营玻璃盖板、金属中框、"
-                         "蓝宝石与陶瓷部件。"},
-            {"code": "002938", "name": "鹏鼎控股", "industry": "元件",
-             "business": "全球主要的 PCB（印制电路板）厂商之一，产品覆盖消费电子用软板、"
-                         "类载板与高密度互连板。"},
-        ],
-    },
-    "MSFT": {
-        "name": "Microsoft Corp.",
-        "business": "企业软件与云计算。核心是 Azure 公有云、Microsoft 365 订阅、"
-                    "Windows 与服务器软件，外带 LinkedIn 与游戏业务。作为 OpenAI 的主要投资方，"
-                    "它把 Copilot 系列嵌进全线产品 —— 商业模式是「软件订阅 + 云算力」两层收费。",
-        "peers": [
-            {"code": "600588", "name": "用友网络", "industry": "软件开发",
-             "business": "国内企业管理软件（ERP／财务／人力）的主要厂商之一，"
-                         "近年从卖 License 转向云订阅模式。"},
-            {"code": "688111", "name": "金山办公", "industry": "软件开发",
-             "business": "办公软件与云文档厂商，WPS 系列覆盖桌面与移动端，"
-                         "订阅制收入占比持续提升。"},
-            {"code": "002230", "name": "科大讯飞", "industry": "软件开发",
-             "business": "智能语音与人工智能厂商，业务覆盖教育、医疗、办公等场景的"
-                         "语音识别与行业大模型。"},
-            {"code": "600845", "name": "宝信软件", "industry": "IT服务Ⅱ",
-             "business": "工业软件与数据中心业务并重，源自钢铁行业信息化，"
-                         "IDC 业务是另一条主要收入线。"},
-            {"code": "300454", "name": "深信服", "industry": "软件开发",
-             "business": "企业级网络安全与云计算基础设施厂商，产品含防火墙、"
-                         "上网行为管理与超融合一体机。"},
-        ],
-    },
-    "GOOGL": {
-        "name": "Alphabet Inc.",
-        "business": "全球最大的搜索与数字广告平台（Google Search、YouTube）。"
-                    "另有两块：Google Cloud 云业务，以及 Android 生态与自研 TPU 芯片。"
-                    "Gemini 大模型是它把 AI 重新塞回搜索与广告库存的抓手。",
-        "peers": [
-            {"code": "601360", "name": "三六零", "industry": "软件开发",
-             "business": "国内以搜索与网络安全为主业的互联网公司，业务含搜索引擎、"
-                         "安全软件与政企安全服务。"},
-            {"code": "002230", "name": "科大讯飞", "industry": "软件开发",
-             "business": "智能语音与人工智能厂商，在大模型与行业应用上投入较大。"},
-            {"code": "300058", "name": "蓝色光标", "industry": "广告营销",
-             "business": "数字营销服务商，业务含品牌营销、效果广告代理与出海营销。"},
-            {"code": "300308", "name": "中际旭创", "industry": "通信设备",
-             "business": "全球主要的高速光模块厂商，产品用于数据中心与电信网络的互联。"},
-        ],
-    },
-    "AMZN": {
-        "name": "Amazon.com Inc.",
-        "business": "全球最大的电商平台，加上全球份额第一的公有云 AWS，"
-                    "以及增长很快的广告业务。三块里云的利润率最高，"
-                    "是市场给它估值的核心；电商是它的规模与现金流底盘。",
-        "peers": [
-            {"code": "000977", "name": "浪潮信息", "industry": "计算机设备",
-             "business": "国内服务器与存储整机的主要厂商之一，AI 服务器出货量居前。"},
-            {"code": "603019", "name": "中科曙光", "industry": "计算机设备",
-             "business": "高端计算与存储基础设施厂商，业务含服务器、存储与"
-                         "数据中心整体解决方案。"},
-            {"code": "300785", "name": "值得买", "industry": "数字媒体",
-             "business": "以导购与比价为核心的电商内容平台，收入主要来自"
-                         "电商平台的导流分成与广告。"},
-            {"code": "002315", "name": "焦点科技", "industry": "互联网电商",
-             "business": "B2B 外贸电商平台（中国制造网），为出口企业提供撮合与配套服务。"},
-        ],
-    },
-    "NVDA": {
-        "name": "NVIDIA Corp.",
-        "business": "全球 AI 算力的核心供应商。数据中心 GPU（含整机与网络互联）是主要收入来源，"
-                    "CUDA 软件生态构成护城河；此外还有游戏显卡与汽车／机器人芯片。"
-                    "卖的不只是芯片，而是「芯片 + 互联 + 软件栈」的一整套。",
-        "peers": [
-            {"code": "688256", "name": "寒武纪", "industry": "半导体",
-             "business": "国内 AI 芯片设计公司，产品含云端训练／推理加速卡与边缘智能芯片。"},
-            {"code": "688041", "name": "海光信息", "industry": "半导体",
-             "business": "国产 CPU 与加速卡（DCU）设计厂商，面向服务器与数据中心场景。"},
-            {"code": "300308", "name": "中际旭创", "industry": "通信设备",
-             "business": "高速光模块厂商 —— AI 集群里算力卡之间靠它做光互联，"
-                         "与算力芯片是配套关系而非竞争关系。"},
-            {"code": "300474", "name": "景嘉微", "industry": "军工电子Ⅱ",
-             "business": "国产图形处理（GPU）芯片设计公司，早期以军用图形显控为主，"
-                         "近年拓展通用 GPU。"},
-            {"code": "601138", "name": "工业富联", "industry": "消费电子",
-             "business": "AI 服务器整机代工的主要厂商之一，处在算力硬件从芯片到机柜的"
-                         "组装环节。"},
-        ],
-    },
-    "META": {
-        "name": "Meta Platforms Inc.",
-        "business": "全球最大的社交媒体公司（Facebook / Instagram / WhatsApp / Messenger，"
-                    "约 40 亿月活），收入几乎全部来自数字广告。Reality Labs 做 VR/AR 硬件"
-                    "（目前仍在亏损），Llama 系列开源大模型是它在 AI 上的主要投入方向。",
-        "peers": [
-            {"code": "300058", "name": "蓝色光标", "industry": "广告营销",
-             "business": "数字营销服务商，业务覆盖品牌与效果广告代理 —— 对应 Meta 的广告变现侧。"},
-            {"code": "300308", "name": "中际旭创", "industry": "通信设备",
-             "business": "高速光模块厂商。超大规模数据中心的持续建设会带动其需求，"
-                         "与 Meta 的 AI 基础设施投入是上下游关系。"},
-            {"code": "002241", "name": "歌尔股份", "industry": "消费电子",
-             "business": "VR/AR 整机代工与声学器件厂商，对应 Meta 的硬件（Reality Labs）侧。"},
-            {"code": "002273", "name": "水晶光电", "industry": "光学光电子",
-             "business": "光学元件厂商，产品含光学薄膜、AR 光波导与半导体光学元件。"},
-        ],
-    },
-    "TSLA": {
-        "name": "Tesla Inc.",
-        "business": "电动车龙头（Model 3/Y 为主），加上储能业务（Megapack），"
-                    "以及自动驾驶（FSD）与人形机器人（Optimus）两块期权。"
-                    "电池、电驱、软件与超充网络的垂直整合，是它成本控制的来源。",
-        "peers": [
-            {"code": "002594", "name": "比亚迪", "industry": "乘用车",
-             "business": "国内新能源车龙头，整车与电池、电驱等核心零部件垂直整合，"
-                         "同时对外供应动力电池。"},
-            {"code": "300750", "name": "宁德时代", "industry": "电池",
-             "business": "全球动力电池份额第一，业务含动力电池系统与储能电池系统。"},
-            {"code": "601127", "name": "赛力斯", "industry": "乘用车",
-             "business": "新能源乘用车厂商，与华为在智能座舱与智能驾驶上深度合作。"},
-            {"code": "300124", "name": "汇川技术", "industry": "自动化设备",
-             "business": "工业自动化与新能源汽车电驱／电控系统厂商。"},
-            {"code": "002050", "name": "三花智控", "industry": "家电零部件Ⅱ",
-             "business": "制冷部件与汽车热管理系统厂商，新能源车热管理是其主要增长线。"},
-        ],
-    },
-}
+#: 每家美股最多列几个 A 股对标。超过就截断 —— 弹窗是"扫一眼"的地方，
+#: 列十几个会让人干脆不看了。目前手工挑的都在这条线以内。
+MAX_PEERS = 6
 
 
-def verify_against_a_shares(rows):
-    """用 A 股板块数据核对每个候选的代码 ↔ 名称 ↔ 行业。
-
-    这一步是防「代码写错但看着像对的」：清单里查不到、或名称/行业对不上就报出来。
-    数据文件不存在时跳过（只警告，不阻止生成）。
-    """
-    path = os.path.join(os.path.dirname(OUT), "a_share_sectors.json")
+def _load_json(path, what):
     if not os.path.exists(path):
-        print("  ⚠️ 缺少 data/a_share_sectors.json，跳过核对（建议先跑 import_a_share_sectors.py）")
-        return 0
+        print(f"  ✗ 缺少 {os.path.relpath(path, BASE_DIR)}（{what}），先跑生成它的脚本")
+        sys.exit(1)
     with open(path, encoding="utf-8") as f:
-        index = {r["symbol"]: r for r in (json.load(f).get("rows") or [])}
+        return json.load(f)
 
-    bad = 0
-    for us, row in rows.items():
-        for p in row["peers"]:
-            ref = index.get(p["code"])
-            if ref is None:
-                print(f"  ✗ {us} → {p['code']} {p['name']}：A 股清单里没有这个代码")
-                bad += 1
-            elif ref["name"] != p["name"]:
-                print(f"  ✗ {us} → {p['code']}：名称不符，应为 {ref['name']}（写的是 {p['name']}）")
-                bad += 1
-            elif ref["industry"] != p["industry"]:
-                print(f"  ⚠ {us} → {p['code']} {p['name']}：行业不符，"
-                      f"清单里是「{ref['industry']}」（写的是「{p['industry']}」）")
-                bad += 1
-    return bad
+
+def load_a_share():
+    """A 股清单：代码 → {name, industry}。名称与行业只信这一份，不手写。"""
+    d = _load_json(A_SHARE_PATH, "东财导出的 A 股行业／概念数据")
+    return {r["symbol"]: r for r in (d.get("rows") or [])}
+
+
+def load_catalog_rows():
+    """读全市场美股目录，套用与 server.read_us_catalog 相同的过滤口径。
+
+    过滤条件不在这里写死，而是从 server 模块取常量 —— 见模块开头说明。
+    """
+    d = _load_json(CATALOG_PATH, "Finviz 全市场美股目录")
+    keys = server._FUND_INDUSTRY_KEYS
+    rows, skipped = [], 0
+    for r in d.get("rows") or []:
+        if any(k in (r.get("industry") or "").lower() for k in keys):
+            skipped += 1
+            continue
+        rows.append(r)
+    return rows, skipped
+
+
+def norm_spec(spec):
+    """把一条 peer 声明归一化成 (代码, 自定义描述或 None)。
+
+    两种写法都支持：
+        "300308"                       → 描述从 A_POOL 取
+        ["300308", "针对该场景的补充"]  → 用自定义描述（覆盖 A_POOL）
+    """
+    if isinstance(spec, (list, tuple)):
+        code, note = spec[0], spec[1] if len(spec) > 1 else None
+        return str(code), (str(note) if note else None)
+    return str(spec), None
+
+
+def build_peer(spec, a_index, where):
+    """一条 peer 声明 → 完整的 A 股公司对象（名称与行业来自东财清单）。"""
+    code, note = norm_spec(spec)
+    if code not in A_POOL:
+        print(f"  ✗ {where} 引用了 {code}，但它没有登记在 bizmap_data.A_POOL 里")
+        return None
+    ref = a_index.get(code)
+    if ref is None:
+        print(f"  ✗ {where} 引用了 {code}，但 A 股清单（a_share_sectors.json）里查不到")
+        return None
+    return {"code": code, "name": ref["name"], "industry": ref["industry"],
+            "business": note or A_POOL[code]}
+
+
+def build_industry_peers(key, a_index):
+    """某个行业的 A 股对标列表。返回 (列表, 出错数)。"""
+    out, bad = [], 0
+    for spec in INDUSTRIES[key].get("peers") or []:
+        p = build_peer(spec, a_index, f"行业 {key}")
+        if p is None:
+            bad += 1
+        else:
+            out.append(p)
+    return out[:MAX_PEERS], bad
 
 
 def main():
-    rows = {}
-    for sym, r in ROWS.items():
-        rows[sym] = {
-            "symbol": sym,
-            "name": r["name"],
-            "business": r["business"],
-            "peers": r["peers"],
-        }
+    a_index = load_a_share()
+    catalog, skipped = load_catalog_rows()
+    problems = 0
 
-    print("核对 A 股代码 / 名称 / 行业：")
-    bad = verify_against_a_shares(rows)
-    print("  " + ("全部一致 ✓" if bad == 0 else f"{bad} 处不一致 ✗"))
+    print("① 核对 A 股公司池（代码必须存在于东财清单）：")
+    missing = [c for c in A_POOL if c not in a_index]
+    for c in missing:
+        print(f"  ✗ {c}：a_share_sectors.json 里没有这个代码")
+    problems += len(missing)
+    print(f"  池内 {len(A_POOL)} 家，" +
+          ("全部对得上 ✓" if not missing else f"{len(missing)} 家对不上 ✗"))
+
+    print("② 覆盖目录出现过的全部行业（key 写错会让整行业静默失效）：")
+    used = sorted({r["industry"] for r in catalog if r.get("industry")})
+    absent = [i for i in used if i not in INDUSTRIES]
+    for i in absent:
+        n = sum(1 for r in catalog if r["industry"] == i)
+        print(f"  ✗ 行业「{i}」（{n} 家）在 INDUSTRIES 里没有定义")
+    problems += len(absent)
+    for k in [k for k in INDUSTRIES if k not in set(used)]:
+        print(f"  ⚠ INDUSTRIES 里的「{k}」在目录中没出现过（可能已被上游改名）")
+    print(f"  目录用到 {len(used)} 个行业，" +
+          ("全部有定义 ✓" if not absent else f"{len(absent)} 个缺失 ✗"))
+
+    print("③ 展开各行业的 A 股对标（引用必须先在池里注册）：")
+    industries = {}
+    for key in INDUSTRIES:
+        peers, bad = build_industry_peers(key, a_index)
+        problems += bad
+        industries[key] = {
+            "zh": taxonomy_zh.industry_zh(key),
+            "desc": INDUSTRIES[key]["desc"],
+            "peers": peers,
+        }
+    covered_ind = sum(1 for v in industries.values() if v["peers"])
+    print(f"  {len(industries)} 个行业，其中 {covered_ind} 个有 A 股对标、"
+          f"{len(industries) - covered_ind} 个如实留空（原因写在各自 desc 里）")
+
+    print("④ 展开人工精写（OVERRIDES）：")
+    overrides = {}
+    for sym, ov in OVERRIDES.items():
+        peers = []
+        for spec in ov.get("peers") or []:
+            p = build_peer(spec, a_index, sym)
+            if p is None:
+                problems += 1
+            else:
+                peers.append(p)
+        overrides[sym.upper()] = {"business": ov["business"], "peers": peers[:MAX_PEERS]}
+    print(f"  {len(overrides)} 家精写：" + "、".join(sorted(overrides)))
+
+    if problems:
+        print(f"\n✗ 共 {problems} 处问题，未写入文件。修好再跑一次。")
+        sys.exit(1)
+
+    # ------------------------------------------------------------------ 组装
+    # rows 只存「这家美股是谁、归哪个行业」，行业说明与对标列表放在 industries 里共享 ——
+    # 4279 份一模一样的行业说明会把 JSON 撑到十几 MB，而它们本来就只有 144 种。
+    rows = {}
+    for r in catalog:
+        rows[r["symbol"].upper()] = {
+            "name": r.get("name") or "",
+            "industryKey": r.get("industry") or "",
+        }
+    for sym in overrides:
+        if sym not in rows:
+            print(f"  ⚠ OVERRIDES 里的 {sym} 不在目录中（可能已退市或改代码），仍会写入")
+
+    covered = sum(1 for sym, r in rows.items()
+                  if overrides.get(sym) or industries.get(r["industryKey"], {}).get("peers"))
 
     out = {
         "builtAt": datetime.now(CST).isoformat(timespec="seconds"),
-        "source": "主营业务描述 + A 股业务相似对标；A 股代码／行业经 data/a_share_sectors.json（东财）核对",
+        "source": "行业级业务说明 + A 股业务相似对标；A 股代码／名称／行业经 "
+                  "data/a_share_sectors.json（东财）核对，行业分类来自 Finviz 目录",
         "note": "列出的是业务相似（同赛道对标），不是供应链或股权关系 —— 两者不要混看。",
         "count": len(rows),
+        "covered": covered,
+        "industryCount": len(industries),
+        "rawCount": len(catalog) + skipped,
+        "skippedFund": skipped,
+        "overrides": overrides,
+        "industries": industries,
         "rows": rows,
     }
 
     os.makedirs(os.path.dirname(OUT), exist_ok=True)
     tmp = OUT + ".tmp"
     with open(tmp, "w", encoding="utf-8") as f:
-        json.dump(out, f, ensure_ascii=False, indent=1)
+        json.dump(out, f, ensure_ascii=False, separators=(",", ":"))
     os.replace(tmp, OUT)
 
-    n = sum(len(r["peers"]) for r in rows.values())
-    print(f"\n已写入 {os.path.relpath(OUT)}：{len(rows)} 家美股 / {n} 条 A 股对标"
-          f"（{os.path.getsize(OUT) / 1024:.1f} KB）")
+    print(f"\n已写入 {os.path.relpath(OUT, BASE_DIR)}："
+          f"{len(rows)} 家美股 / {len(industries)} 个行业 / {len(overrides)} 家精写")
+    print(f"  有 A 股对标的 {covered} 家（{covered / max(1, len(rows)) * 100:.0f}%），"
+          f"其余所属行业在 A 股本身无对标")
+    print(f"  文件 {os.path.getsize(OUT) / 1024:.0f} KB（行业说明按行业共享，未逐家冗余）")
     txt = open(OUT, encoding="utf-8").read()
-    print(f"markdown 星号自检：{txt.count('**')} 处（应为 0 —— 页面纯文本渲染）")
+    print(f"  markdown 星号自检：{txt.count('**')} 处（应为 0 —— 页面按纯文本渲染）")
 
 
 if __name__ == "__main__":

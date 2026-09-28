@@ -24,15 +24,20 @@
    *  @param {string} symbol  美股代码（点击时据此取数据）
    *  @param {string} name    公司名（弹窗标题用）
    *  @param {number} count   已有映射条数；0 或缺失 = 尚无分析
-   *  @param {object} [texts] 可选文案 { title, empty }，两处措辞不同
+   *  @param {object} [texts] 可选文案 { title, empty, has }，两处措辞不同
    *  data-sym / data-name 供事件委托读取 —— 表格每次刷新都整块重建，
    *  不给每个按钮单独绑监听（见 evening.js / linkage.js 的委托注释）。 */
   M.html = function (symbol, name, count, texts) {
     texts = texts || {};
     var n = count > 0 ? count : 0;
-    var title = n ? (texts.title || ("查看 " + n + " 条映射"))
-                  : (texts.empty || "还没有映射数据");
-    return '<button type="button" class="map-btn' + (n ? "" : " map-btn--none") +
+    /* "有没有内容可看"与"有几条对标"是两件事，默认按条数推断，调用方也可用
+       texts.has 显式指定。之所以要分开：夜盘页的 0 条是真没分析过（灰按钮，
+       点开是"数据从哪来"的说明），而明暗对照页的 0 条是**所属行业在 A 股没有对标**
+       （点开有行业说明，内容并不空）—— 后者画成灰的会让人以为数据没生成。 */
+    var has = texts.has === undefined ? n > 0 : !!texts.has;
+    var title = has ? (texts.title || ("查看 " + n + " 条映射"))
+                    : (texts.empty || "还没有映射数据");
+    return '<button type="button" class="map-btn' + (has ? "" : " map-btn--none") +
       '" data-sym="' + M.esc(symbol) + '" data-name="' + M.esc(name || "") +
       '" title="' + M.esc(title) + '">点击查看</button>';
   };
