@@ -82,9 +82,10 @@ run "早盘两列表的排序"               "$NODE" tools/test_morning_order.js
 run "关注池自定义增删"               "$NODE" tools/test_morning_watchlist.js
 run "美股代码目录（解析 + 排名）"     "$PY"   tools/test_symbols.py
 run "早盘全档校验（提前退出 / 阈值 / 缓存）" "$PY" tools/test_wide_scan.py
-run "夜盘标签页：点击反馈与跨页记忆" "$NODE" tools/test_evening_tabs.js
+run "夜盘标签页与表格列（点击反馈 / 跨页记忆 / 映射列已移除）" "$NODE" tools/test_evening_tabs.js
 run "夜盘「驱动原因」跟着行情重取（每轮取 / 不并发 / 没变不重画）" "$NODE" tools/test_evening_reasons.js
-run "夜盘 A 股映射（列 · 弹窗内容 · 组件）" "$NODE" tools/test_sharemap.js
+run "夜盘 A 股映射悬停（触发点 / 预热 / 触屏 / 旧服务）" "$NODE" tools/test_evening_biztip.js
+run "A 股映射弹窗渲染器（事件驱动那份 · 现未挂载）" "$NODE" tools/test_sharemap.js
 run "明暗对照 A 股业务映射（列 · 弹窗 · 折叠）" "$NODE" tools/test_businessmap.js
 run "明暗对照「只看有 A 股映射」（口径 / 载入态 / 计数）" "$NODE" tools/test_linkage_bizfilter.js
 run "明暗对照映射数据（与目录同源 / 引用完整）" "$PY" tools/test_business_map_data.py

@@ -56,13 +56,8 @@ function feed(d) { global.Shell.state.data = d; cap.onData(d); }
 
 eval(fs.readFileSync(ROOT + "static/util.js", "utf8"));
 eval(fs.readFileSync(ROOT + "static/combo.js", "utf8"));
-// evening.js 渲染「A 股映射」列时会调 ShareMap.button(...)，
-// 所以这里必须把 sharemap.js 一起加载 —— 漏了会报 ShareMap is not defined，
-// 而这个错误直到有人跑用例才会暴露（页面本身是好的）。
-// mapbtn.js 要排在它前面：ShareMap.button 现在转发给 MapBtn（两页共用那份实现）。
-// 组件本身的断言在 tools/test_sharemap.js，这里只是补齐运行环境。
-eval(fs.readFileSync(ROOT + "static/mapbtn.js", "utf8"));
-eval(fs.readFileSync(ROOT + "static/sharemap.js", "utf8"));
+/* 夜盘页不再有「A 股映射」列（2026-09-29 改成悬停提示了），所以这里不用再加载
+   sharemap.js / mapbtn.js —— 原先是为了补一个 evening.js 需要的运行环境。 */
 eval(fs.readFileSync(ROOT + "static/evening.js", "utf8"));
 
 let fail = 0;

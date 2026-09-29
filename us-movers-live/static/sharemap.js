@@ -1,5 +1,14 @@
 /* 「A 股映射」弹窗内容的渲染器 —— 纯函数：aShareMap 数据 → HTML 字符串。
  *
+ * ⚠️ **当前没有任何页面挂它。** 它原本挂在夜盘异动页的最后一列（每行一个
+ * 「点击查看」按钮 → 弹窗）。2026-09-29 用户要求把那一列去掉，改成代码/公司名的
+ * 悬停提示（那是**另一套口径**：明暗对照页的业务相似度，见 bizmap.js / biztip.js）。
+ * 文件与用例都留着 —— 事件驱动的这份映射（证据 / 强度 / 风险，输入是「代码 + 驱动原因」）
+ * 属于 skill `us-stock-to-a-share-mapper` 的产物，`data/reasons.json` 里照旧在写，
+ * 将来若换个地方展示（例如悬停卡里补一段、或单独一页），直接取用即可。
+ * 要恢复那一列：index.html 引回 mapbtn/modal/sharemap，evening.js 里把 tableHtml 的
+ * td.map 与 bindMapButtons 加回去（git 历史里都有）。
+ *
  * 数据由 `us-stock-to-a-share-mapper` skill 的分析结果写入 `data/reasons.json`
  * 的每条原因里（见 README「A 股映射」一节）。
  *

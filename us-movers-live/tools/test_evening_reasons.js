@@ -5,8 +5,9 @@
    为什么单独测
    ------------
    原先 loadReasons() 只在**进页面时**取一次。起因是补原因的自动化只在工作日 16:40
-   收盘后跑一次 —— 那时"取一次"是合理的。2026-09-29 改成自动化盘中每 2 小时也跑
-   （10:40/12:40/14:40/16:40），页面这边就必须跟着取：长开的看板停在打开那一刻，
+   收盘后跑一次 —— 那时"取一次"是合理的。2026-09-29 改成**每 2 小时（工作日）**跑一次，
+   实际落点 :13（08:13/10:13/12:13/14:13 盘中补 + 16:13 收口），
+   页面这边就必须跟着取：长开的看板停在打开那一刻，
    补进去的原因要手动刷新才看得见，用户看到的就是"驱动原因怎么还是没有"。
 
    这类改动的失效方式全是**静默**的，所以每条都单独钉：
@@ -130,9 +131,10 @@ global.Shell = { state: {}, mount(o) { cap = o; }, syncCountdown() {} };
 
 eval(fs.readFileSync(ROOT + "static/util.js", "utf8"));
 eval(fs.readFileSync(ROOT + "static/combo.js", "utf8"));
-eval(fs.readFileSync(ROOT + "static/mapbtn.js", "utf8"));
-eval(fs.readFileSync(ROOT + "static/sharemap.js", "utf8"));
-eval(fs.readFileSync(ROOT + "static/modal.js", "utf8"));
+/* 刻意**不**加载 bizmap.js / biztip.js：这份用例只盯「驱动原因」的取数时序，
+   悬停那条链路在 tools/test_evening_biztip.js 里测。
+   顺带把"页面忘了引脚本"那条降级路径也走了一遍 —— 脚本不在时 bindBizTip()
+   该安静跳过，不能影响这张表的渲染。 */
 eval(fs.readFileSync(ROOT + "static/evening.js", "utf8"));
 
 /* ------------------------------------------------------------------ 构造数据 */
@@ -233,7 +235,10 @@ function section(t) { console.log("\n" + t); }
   payload = { ok: true };
   w0 = tableWrites;
   feed(); await flush();
-  check("缺 reasons 字段 → 当成空表，行数还在", (html().match(/<td class="code">/g) || []).length, 2);
+  /* ⚠️ 正则**不能**写死成 `<td class="code">`：2026-09-29 起代码格上多了
+     data-biztip（悬停提示的触发点），写死的那种会静默匹配到 0 行。 */
+  check("缺 reasons 字段 → 当成空表，行数还在",
+    (html().match(/<td class="code"[^>]*>/g) || []).length, 2);
 
   console.log("");
   if (fail === 0) console.log("全部通过 ✓");

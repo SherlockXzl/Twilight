@@ -47,13 +47,13 @@
 <script src="util.js"></script>
 <script src="icons.js"></script>
 <script src="combo.js"></script>
-<!-- mapbtn.js：「A 股映射」列的按钮，与明暗对照页共用同一份实现 -->
-<script src="mapbtn.js"></script>
-<script src="modal.js"></script>
-<!-- sharemap.js：把「A 股映射」的数据渲染成弹窗内容。
-     与 evening.js 分开是因为它是纯函数（数据 → HTML 字符串），可以单独跑单测；
-     内容结构又长，塞进页面脚本会把分档/筛选那部分逻辑淹掉。 -->
-<script src="sharemap.js"></script>
+<!-- bizmap.js + biztip.js：代码/公司名的悬停提示（把光标放上去列出 A 股对标公司）。
+     与早盘总结页「个股异动榜」是**同一套**：bizmap.js 是共用的数据装配与接线
+     （别在 evening.js 里再写一份），biztip.js 是悬停卡本身。都必须排在 evening.js 之前。
+     这一页原先还有个「A 股映射」列（每行一个「点击查看」按钮 → sharemap.js 的弹窗），
+     2026-09-29 按用户要求去掉，改成这里的悬停卡。 -->
+<script src="bizmap.js"></script>
+<script src="biztip.js"></script>
 <script src="shell.js"></script>
 <script src="evening.js"></script>
 </body>

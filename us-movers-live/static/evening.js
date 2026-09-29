@@ -31,7 +31,9 @@
   var state = { tab: savedTab(), q: "", sector: "", industry: "", reasons: {},
                 //: 「原因」请求是否还在路上。见 loadReasons()：它现在跟着每轮行情重取，
                 //: 必须挡住并发，别让 60 秒心跳和一次手动刷新同时发两份。
-                reasonsLoading: false };
+                reasonsLoading: false,
+                //: 「A 股映射」悬停卡要用的整包数据与加载标记，见「悬停提示」一节。
+                biz: null, bizLoading: false };
 
   //: 分档的固定顺序与名称。实际出几个标签页由**后端返回的 tables 决定** ——
   //: 后端关掉下跌档（SHOW_DOWN=0）时，这里不会凭空造出「跌」的标签。
@@ -203,7 +205,8 @@
      **跟着每轮行情重取**（2026-09-29 改，此前是"进页面取一次"）。
      起因：补原因的自动化原先只在工作日 16:40 收盘后跑一次，盘中 08:00–16:00 新冒出来的票
      只能显示「待确认」；用户看到的就是"夜盘异动的驱动原因怎么还是没有"。
-     两处一起改 —— 自动化改成盘中每 2 小时也跑一次（10:40/12:40/14:40/16:40），
+     两处一起改 —— 自动化改成**每 2 小时（工作日）**跑一次，实际落点 :13
+     （08:13 / 10:13 / 12:13 / 14:13 盘中补 + 16:13 收盘收口），
      页面这边就必须跟着取，否则长开的看板永远停在打开那一刻，补进去的原因要手动刷新才看得见。
 
      三个细节：
@@ -247,51 +250,28 @@
     return (r && r.driver) ? r : null;
   }
 
-  /* 「A 股映射」列要的条目：必须有非空的映射候选。
-     ⚠️ 与 driver 分开判断，不要合并成一个检查：aShareMap 是独立字段，
-     某条完全可能只有原因没有映射（正常，映射是后补的、更慢的产物），
-     那时原因列照常显示，映射按钮显示成「未分析」态。 */
-  function mapOf(symbol) {
-    var r = entryOf(symbol);
-    var m = r && r.aShareMap;
-    return (m && m.rows && m.rows.length) ? m : null;
-  }
+  /* 「A 股映射」**列** 2026-09-29 按用户要求去掉，改成代码/公司名上的悬停卡
+     （见下面的「悬停提示」一节）—— 与早盘页「个股异动榜」同一套交互、同一份数据。
 
-  /** A 股映射列的按钮 —— 生成逻辑在 sharemap.js（那一列的渲染器），这里只做取数。 */
-  function mapBtn(symbol, name) {
-    return ShareMap.button(symbol, name, mapOf(symbol));
-  }
+     去掉的是那一列（每行一个「点击查看」按钮 + 弹窗），不是这个功能：
+       · 那一列占 208px 宽，而它要回答的问题（这只票对应 A 股谁）与早盘页是同一个，
+         两页各用一种交互，只会让人以为"两处的映射不是一回事"；
+       · 按钮列还有大半是灰的（事件驱动的映射是后补产物，只有部分票有），
+         悬停卡走的是全市场业务目录，每只票都有内容。
+     原那一套（sharemap.js 的弹窗渲染 + aShareMap 数据 + Modal）都留着没删，
+     只是当前没有页面挂它 —— 见 README「A 股映射」一节。
 
-  /** 点开某只票的 A 股映射弹窗。
-   *  内容由 sharemap.js 渲染 —— 把「数据 → HTML」抽出去是为了能单独单测，
-   *  也为了早盘页将来要用时不必复制一遍。 */
-  function openMap(symbol, name) {
-    var r = entryOf(symbol);
-    var m = mapOf(symbol);
-    Modal.open({
-      title: (name ? name + "（" + symbol + "）" : symbol) + " · A 股映射",
-      subtitle: m ? "共 " + m.rows.length + " 只候选 · 按关联强度排序"
-                  : "尚未生成",
-      // 驱动原因作为「映射依据」回显在弹窗顶部 —— skill 的输入就是它
-      bodyHtml: ShareMap.render(m, { driver: r ? r.driver : "" })
-    });
-  }
-
-  /* 列与早盘页「个股异动榜」对齐：代码/公司全称/价格/涨跌幅/总市值/板块/行业 + 驱动原因，
-     再加夜盘独有的「A 股映射」（早盘页还没有这一列，见 README）。
-     原先的最后两列（「分档」药丸、「查原因」外链）已去掉 —— 分档信息由上方标签页承担，
+     列与早盘页「个股异动榜」完全对齐：代码/公司全称/价格/涨跌幅/总市值/板块/行业 + 驱动原因。
+     更早去掉的两列（「分档」药丸、「查原因」外链）理由见下：分档信息由上方标签页承担，
      原因改成一整句话直接写出来，与早盘页同一口径。
      「国家」列也去掉了（用户 2026-09-22 要求）：宽屏下每列更宽松。
      与之配套的「只看非美国本土公司」勾选也一并去掉 —— 判断依据那一列不显示了，
-     留着一个看不见依据的过滤器只会让人以为数据缺失。
-
-     「A 股映射」放在驱动原因**之后**：阅读顺序是「涨了多少 → 为什么涨 → 这逻辑对应 A 股谁」，
-     反过来的话读者要先看到结果再去找依据。 */
+     留着一个看不见依据的过滤器只会让人以为数据缺失。 */
   function tableHtml(rows) {
     if (!rows.length) return '<div class="empty">当前筛选条件下没有数据</div>';
     var head = "<tr><th>代码</th><th>公司全称</th><th class=\"num\">价格(USD)</th>" +
                "<th class=\"num\">涨跌幅</th><th class=\"num\">总市值(亿美元)</th>" +
-               "<th>板块</th><th>行业</th><th>驱动原因</th><th class=\"map\">A 股映射</th></tr>";
+               "<th>板块</th><th>行业</th><th>驱动原因</th></tr>";
     var body = rows.map(function (r) {
       var dir = U.dirClass(r.chg);
       var reason = reasonOf(r.symbol);
@@ -299,9 +279,12 @@
         ? (reason.from === "morning" ? "来自早盘复盘 " : "来自夜盘原因文件 ")
           + (reason.tradeDate || "—")
         : "暂无分析结果";
+      /* data-biztip 挂在**代码与公司名两格**上（用户要求"光标放在代码或名称时"都触发），
+         值是该行的美股代码 —— 悬停卡自己据此查 A 股映射（见 biztip.js）。
+         被剔除对照表走的是同一个 tableHtml，所以那边也一并有了。 */
       return "<tr>" +
-        '<td class="code">' + U.esc(r.symbol) + "</td>" +
-        '<td class="name">' + U.esc(r.name) + "</td>" +
+        '<td class="code" data-biztip="' + U.esc(r.symbol) + '">' + U.esc(r.symbol) + "</td>" +
+        '<td class="name" data-biztip="' + U.esc(r.symbol) + '">' + U.esc(r.name) + "</td>" +
         '<td class="num">' + U.fPrice(r.price) + "</td>" +
         '<td class="num"><span class="chg ' + dir + '">' + U.fPct(r.chg) + "</span></td>" +
         '<td class="num">' + U.fCap(r.marketCap) + "</td>" +
@@ -309,7 +292,6 @@
         '<td class="ind" title="' + U.esc(r.industryEn || "") + '">' + U.esc(r.industry || "—") + "</td>" +
         '<td class="why" title="' + U.esc(whyTitle) + '">' +
           U.esc(reason ? reason.driver : "待确认") + "</td>" +
-        '<td class="map">' + mapBtn(r.symbol, r.name) + "</td>" +
         "</tr>";
     }).join("");
     return '<div class="tblwrap"><table class="t-evening"><thead>' + head + "</thead><tbody>" + body + "</tbody></table></div>";
@@ -350,29 +332,33 @@
     renderBody();
     renderExcluded();
     loadReasons();       // 「驱动原因」跟着每轮行情重取（理由见 loadReasons 上方）
+    bindBizTip();        // A 股映射的悬停提示（接线一次 + 预热取数，见「悬停提示」一节）
   }
 
   $("q").addEventListener("input", function () { state.q = this.value; renderBody(); });
 
-  /* 「A 股映射」按钮 —— **事件委托**，不逐个绑定。
-     表格每次行情刷新都整块重建（夜盘中 3~4 分钟一次），逐个绑监听会越绑越多，
-     内存和响应都会慢慢退化。页里的分页器出于同样理由用了委托（见 linkage.js）。
-     两个 host 都要挂：主表和被剔除对照表用的是同一个 tableHtml，按钮形态一致，
-     少挂一个会出现"这儿的按钮点了没反应"。 */
-  function bindMapButtons(hostId) {
-    var host = $(hostId);
-    if (!host) return;
-    host.addEventListener("click", function (e) {
-      var b = e.target.closest ? e.target.closest(".map-btn") : null;
-      if (!b) return;
-      openMap(b.getAttribute("data-sym"), b.getAttribute("data-name"));
-    });
+  /* ------------------------------------------------------- A 股映射的悬停提示
+     （2026-09-29 按用户要求，把原先那一列「A 股映射」搬到悬停上）
+
+     光标放在本页表格（主表与「被剔除对照表」）的代码/公司名上，弹一张小卡列出
+     A 股里业务相似的公司（代码 + 名称）。**交互和逻辑与早盘总结页的「个股异动榜」
+     完全一致** —— 同一份数据（/api/us-business-map）、同一个组件（biztip.js），
+     连预热与守卫都在同一处（bizmap.js 的 attach / warm）。
+
+     这里刻意只留一层薄包装：那几条守卫（预热时机 / 认版本号 / 触屏跳过 /
+     数据不到就什么都不显示）写错时都**不报错**、只是功能静默失效，
+     两页各写一份必然漂移 —— 逐条解释在 bizmap.js 里。 */
+  function bindBizTip() {
+    // 脚本没到位（例如某个页面忘了引 bizmap.js）时不该整页报错：
+    // 少一个悬停提示，不该把夜盘这张表弄挂。
+    // （biztip.js 缺失由 BizMap.attach 内部认出来，返回 false 而已。）
+    if (typeof BizMap === "undefined") return;
+    BizMap.attach(state);
   }
-  bindMapButtons("tableHost");
-  bindMapButtons("exclHost");
 
   initFilters();     // 下拉先建好；选项由首轮 renderFilters() 填
   Shell.mount({ navKey: "evening", title: "夜盘异动", onData: onData });
   /* 这里**刻意不调 loadReasons()**：原因只出现在表格里，而表格要等首轮行情才有，
-     所以第一份原因请求交给 onData 发（见 loadReasons 注释第 1 条）。 */
+     所以第一份原因请求交给 onData 发（见 loadReasons 注释第 1 条）。
+     同理也不在这里预热映射数据 —— bindBizTip 在 onData 里调，首轮行情到了才接线。 */
 })();
