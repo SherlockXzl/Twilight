@@ -1,6 +1,12 @@
 #!/usr/bin/env node
 /* 悬停类 UI 的「真实输入 + 截图」校验工具。
  *
+ * ⚠️ 这个脚本在用户级技能 `headless-ui-verify` 里还有一份通用版
+ *    （`~/.workbuddy/skills/headless-ui-verify/scripts/hover_check.js`，
+ *    注释里不带本项目信息）。**改逻辑要两边一起改** —— 只改一份时另一份会静默
+ *    停在旧逻辑上，脚本本身照样跑得动、不报错，于是"用它验出来"的结论是错的。
+ *    两份的比对办法写在那个技能的 SKILL.md 里。
+ *
  * 为什么需要它
  * ------------
  * `visual_check.py shot` 只是 `chrome --screenshot`，它**不会把鼠标放到任何地方**，
