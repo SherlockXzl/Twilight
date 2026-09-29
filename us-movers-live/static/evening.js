@@ -28,7 +28,10 @@
     try { localStorage.setItem(TAB_STORE, key); } catch (e) { /* 存不了就算了 */ }
   }
 
-  var state = { tab: savedTab(), q: "", sector: "", industry: "", reasons: {} };
+  var state = { tab: savedTab(), q: "", sector: "", industry: "", reasons: {},
+                //: 「原因」请求是否还在路上。见 loadReasons()：它现在跟着每轮行情重取，
+                //: 必须挡住并发，别让 60 秒心跳和一次手动刷新同时发两份。
+                reasonsLoading: false };
 
   //: 分档的固定顺序与名称。实际出几个标签页由**后端返回的 tables 决定** ——
   //: 后端关掉下跌档（SHOW_DOWN=0）时，这里不会凭空造出「跌」的标签。
@@ -196,16 +199,41 @@
 
   /* 「驱动原因」列的数据：GET /api/reasons（服务端只读 data/reasons.json + 最近一份
      早盘复盘的 driver），口径与早盘页「个股异动榜 · 驱动原因」完全一致 —— 都是分析后的一句话。
-     原因比行情变得慢得多，只在进页面时取一次，不跟着 60 秒的行情轮询走。 */
+
+     **跟着每轮行情重取**（2026-09-29 改，此前是"进页面取一次"）。
+     起因：补原因的自动化原先只在工作日 16:40 收盘后跑一次，盘中 08:00–16:00 新冒出来的票
+     只能显示「待确认」；用户看到的就是"夜盘异动的驱动原因怎么还是没有"。
+     两处一起改 —— 自动化改成盘中每 2 小时也跑一次（10:40/12:40/14:40/16:40），
+     页面这边就必须跟着取，否则长开的看板永远停在打开那一刻，补进去的原因要手动刷新才看得见。
+
+     三个细节：
+     1. **不再在进页面时单独取一次**。原因只能显示在表格里（renderBody 依赖 Shell.state.data），
+        而表格要等首轮行情才建得起来 —— 提前取纯粹是白发一份请求，onData 里那次就够了。
+     2. **请求在飞时不重发**（reasonsLoading）。心跳 60 秒一次、原因响应可能更慢，
+        不挡的话会叠加出好几份在途请求。
+     3. **内容没变就不重画**（sameReasons）。表格是 innerHTML 整块重建的（见 renderBody），
+        每轮白重画一次会把横向滚动位置顶回最左边 —— 读者刚拖到「驱动原因」列，
+        下一轮心跳就被弹回去。这份 JSON 会一直重复到达，绝大多数轮次内容都不变。 */
+  function sameReasons(a, b) {
+    return JSON.stringify(a || {}) === JSON.stringify(b || {});
+  }
+
   function loadReasons() {
-    return fetch("/api/reasons", { cache: "no-store" })
+    if (state.reasonsLoading) return;
+    state.reasonsLoading = true;
+    fetch("/api/reasons", { cache: "no-store" })
       .then(function (r) { return r.json(); })
       .then(function (j) {
-        state.reasons = (j && j.reasons) || {};
+        // 复位放在最前面：后面一旦抛异常，标志也必须已经清掉，
+        // 否则这一页从此再也不取原因（"只在成功路径复位"是本项目踩过的坑）。
+        state.reasonsLoading = false;
+        var next = (j && j.reasons) || {};
+        if (sameReasons(next, state.reasons)) return;
+        state.reasons = next;
         renderBody();
         renderExcluded();
       })
-      .catch(function () { /* 拿不到就整列显示「待确认」，不影响行情表 */ });
+      .catch(function () { state.reasonsLoading = false; /* 拿不到就整列「待确认」，不影响行情表 */ });
   }
 
   /** 该代码在原因文件里的原始条目。 */
@@ -321,6 +349,7 @@
     renderFilters();     // 必须早于 renderBody：板块/行业失效时会在这里回落
     renderBody();
     renderExcluded();
+    loadReasons();       // 「驱动原因」跟着每轮行情重取（理由见 loadReasons 上方）
   }
 
   $("q").addEventListener("input", function () { state.q = this.value; renderBody(); });
@@ -344,5 +373,6 @@
 
   initFilters();     // 下拉先建好；选项由首轮 renderFilters() 填
   Shell.mount({ navKey: "evening", title: "夜盘异动", onData: onData });
-  loadReasons();     // 原因只在进页面时取一次，不跟着行情轮询
+  /* 这里**刻意不调 loadReasons()**：原因只出现在表格里，而表格要等首轮行情才有，
+     所以第一份原因请求交给 onData 发（见 loadReasons 注释第 1 条）。 */
 })();

@@ -123,8 +123,12 @@ global.document = {
   body: { style: {}, appendChild() {} },
   activeElement: null
 };
-/* fetch 永不 resolve —— loadReasons 是"进页面取一次原因"，与标签交互无关，
-   让它挂着可以避免异步回调在断言中途插进来改 DOM。 */
+/* fetch 永不 resolve —— 「驱动原因」的取数（loadReasons）与标签交互无关，
+   让它挂着可以避免异步回调在断言中途插进来改 DOM。
+   （2026-09-29 起 loadReasons 由 onData 调用、跟着每轮行情重取，
+   所以这里每次 feed 都会发一次；挂着不落地正好让 reasonsLoading 一直为真，
+   后续调用直接 return，对标签断言没有任何干扰。原因刷新本身在
+   tools/test_evening_reasons.js 里单独测。） */
 global.fetch = () => new Promise(() => {});
 
 /* ------------------------------------------------------- localStorage 桩 */
