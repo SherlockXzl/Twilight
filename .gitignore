@@ -8,3 +8,13 @@
 #
 # 配套动作：git rm --cached .DS_Store（停止跟踪，磁盘文件保留，下次 commit 生效）。
 .DS_Store
+
+# WorkBuddy 的会话与自动化工作记忆（.workbuddy/memory/**、.workbuddy/**/automations/…）。
+# 它是**会变的运行状态**，不是交付物，从来也没进过库。
+#
+# 2026-09-29 修正：这条规则原本写在 us-movers-live/.gitignore 里，而忽略规则只作用于
+# 「其所在目录及子目录」—— 它管得到 us-movers-live/.workbuddy/，却管不到真正落盘的
+# 仓库根 Twilight/.workbuddy/。于是规则一直在、也一直没生效：每次 git status 都冒出
+# 两个未跟踪的记忆文件，`git add -A` 顺手就会带上（而这正是当初加这条规则想防的事）。
+# 和上面 .DS_Store 是同一个坑 —— **规则写对了，位置错了**。所以挪到仓库根。
+.workbuddy/
