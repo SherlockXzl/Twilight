@@ -66,49 +66,88 @@ stop_stale_server() {
     return 1
   fi
   kill "$pid" 2>/dev/null || { bad "结束进程 ${pid} 失败"; return 1; }
-  # 等端口真正释放。kill 之后监听套接字可能还留一小会儿，
-  # 不等就起新进程会撞上 "Address already in use" —— 症状同样是"重启了但没变化"。
+  # 判据是「**这个 pid** 没了」，不是「端口不通了」。
+  # 为什么不能用端口：plist 里 KeepAlive 开着，kill 掉占位的旧进程后 launchd 会
+  # 立刻（ThrottleInterval=10s）拉起一个新的，端口马上就又通了 —— 用端口判据会把
+  # 「已成功换血」误报成「旧进程没停下来」然后 exit 1，用户看到「重启失败」跑去排障，
+  # 而服务其实已经换成新代码了。2026-10-09 就是这么踩到的（下面 ① 处还有一坑）。
   for i in $(seq 1 15); do
-    curl -s --noproxy '*' --max-time 1 http://127.0.0.1:8787/healthz >/dev/null 2>&1 || break
+    kill -0 "$pid" 2>/dev/null || break
     sleep 1
   done
-  if curl -s --noproxy '*' --max-time 1 http://127.0.0.1:8787/healthz >/dev/null 2>&1; then
+  if kill -0 "$pid" 2>/dev/null; then
     bad "旧进程（pid ${pid}）没停下来 —— 手动 kill 它再重试"
     return 1
   fi
+  # 再给新进程一点时间把监听套接字建起来（等不到也不判失败，交给后面的健康检查）。
+  for i in $(seq 1 10); do
+    curl -s --noproxy '*' --max-time 1 http://127.0.0.1:8787/healthz >/dev/null 2>&1 && break
+    sleep 1
+  done
   ok "已停掉旧服务（pid ${pid}）"
   return 0
 }
 
 step "① 看板服务（127.0.0.1:8787）"
+
+LAUNCHD_LABEL="com.chenhunxian.us-movers-live"
+healthz() { curl -s --noproxy '*' --max-time 3 http://127.0.0.1:8787/healthz >/dev/null 2>&1; }
+SERVER_UP=0
+
 if [ "$RESTART" = "1" ]; then
   stop_stale_server || exit 1
+
+  # ⚠️ launchd 已注册（plist 里有 RunAtLoad + KeepAlive）时，重启**必须**交给它。
+  # 否则 nohup 起出来的进程不被 launchd 认识，它还会每隔 ThrottleInterval 再拉一个、
+  # 撞端口、退出、再拉…… 页面于是永远停在旧代码上，日志还被这堆 Traceback 撑到几 MB。
+  # 2026-10-09 实地踩到：期股页报「服务返回的结构与本页不匹配（需要 v2，收到 v1）」，
+  # 就是昨晚 23:38 改完 server.py 后，这个 nohup 野进程一直占着 8787，
+  # launchd 反复重试 4500+ 次、每次都 Address already in use —— 新代码一次都没跑起来。
+  if launchctl print "gui/$(id -u)/$LAUNCHD_LABEL" >/dev/null 2>&1; then
+    if launchctl kickstart -k "gui/$(id -u)/$LAUNCHD_LABEL" >/dev/null 2>&1; then
+      ok "已交由 launchd 重启（${LAUNCHD_LABEL}）"
+      for _ in $(seq 1 20); do
+        sleep 1
+        healthz && break
+      done
+      if healthz; then
+        ok "已启动（launchd 托管，日志 /tmp/us-movers-live.log）"
+        SERVER_UP=1
+      else
+        bad "launchd 没能把服务拉起来 —— 回退为手动启动"
+      fi
+    else
+      bad "launchctl kickstart 不可用 —— 回退为手动启动"
+    fi
+  fi
 fi
 
-if curl -s --noproxy '*' --max-time 3 http://127.0.0.1:8787/healthz >/dev/null 2>&1; then
-  if [ "$RESTART" = "1" ]; then
-    # --restart 模式下还能走到这里，说明上面**没能**把它停掉
-    # （最可能是 lsof 列不出占用端口的进程）。这时候绝不能打印"跳过"就收工：
-    # 用户会以为代码换新了，实际还跑着旧的 —— 正是这个脚本今天要根治的那类假象。
-    bad "重启失败：8787 仍被占用，但没能识别出占用它的进程（lsof 看不到）"
-    bad "手动处理：lsof -nP -iTCP:8787 -sTCP:LISTEN 找到 pid，kill 掉，再跑一次本脚本"
-    exit 1
-  fi
-  ok "已经在运行，跳过"
-  printf "  \033[33m!\033[0m %s\n" "注意：这不会重新加载 server.py。改了服务端代码要跑 bash tools/start.sh --restart"
-else
-  cd "$ROOT" || exit 1
-  nohup "$PY" server.py >> /tmp/us-movers-live.log 2>&1 &
-  disown
-  for _ in $(seq 1 20); do
-    sleep 1
-    curl -s --noproxy '*' --max-time 2 http://127.0.0.1:8787/healthz >/dev/null 2>&1 && break
-  done
-  if curl -s --noproxy '*' --max-time 3 http://127.0.0.1:8787/healthz >/dev/null 2>&1; then
-    ok "已启动（日志 /tmp/us-movers-live.log）"
+if [ "$SERVER_UP" != "1" ]; then
+  if healthz; then
+    if [ "$RESTART" = "1" ]; then
+      # --restart 模式下还能走到这里，说明上面**没能**把它停掉
+      # （最可能是 lsof 列不出占用端口的进程）。这时候绝不能打印"跳过"就收工：
+      # 用户会以为代码换新了，实际还跑着旧的 —— 正是这个脚本今天要根治的那类假象。
+      bad "重启失败：8787 仍被占用，但没能识别出占用它的进程（lsof 看不到）"
+      bad "手动处理：lsof -nP -iTCP:8787 -sTCP:LISTEN 找到 pid，kill 掉，再跑一次本脚本"
+      exit 1
+    fi
+    ok "已经在运行，跳过"
+    printf "  \033[33m!\033[0m %s\n" "注意：这不会重新加载 server.py。改了服务端代码要跑 bash tools/start.sh --restart"
   else
-    bad "起不来，看 /tmp/us-movers-live.log"
-    exit 1
+    cd "$ROOT" || exit 1
+    nohup "$PY" server.py >> /tmp/us-movers-live.log 2>&1 &
+    disown
+    for _ in $(seq 1 20); do
+      sleep 1
+      healthz && break
+    done
+    if healthz; then
+      ok "已启动（日志 /tmp/us-movers-live.log）"
+    else
+      bad "起不来，看 /tmp/us-movers-live.log"
+      exit 1
+    fi
   fi
 fi
 
