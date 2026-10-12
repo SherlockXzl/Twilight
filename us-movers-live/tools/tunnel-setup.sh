@@ -33,6 +33,11 @@ CF_DIR="${CF_DIR:-$HOME/.cloudflared}"
 CONFIG="$CF_DIR/config.yml"
 TUNNEL_NAME="${TUNNEL_NAME:-chenhunxian-movers}"
 LOCAL_PORT="${LOCAL_PORT:-8787}"
+# 隧道传输协议。**默认 http2，不是 cloudflared 自己的 quic 默认值** ——
+# 这台机器的网络对 QUIC/UDP 很不友好，日志里全是 "no recent network activity"，
+# 一天断上千次、每次 4 条连接同时掉，空窗期访客就看到 Error 1033。
+# 理由与踩坑细节见下面 config.yml 模板里的注释。想回默认：PROTOCOL=quic 重跑。
+PROTOCOL="${PROTOCOL:-http2}"
 PLIST="${PLIST:-$HOME/Library/LaunchAgents/com.chenhunxian.us-movers-tunnel.plist}"
 LABEL="${LABEL:-com.chenhunxian.us-movers-tunnel}"
 # 只给用例用：跳过 launchd 注册与联网体检（那两步需要真实隧道）
@@ -171,6 +176,20 @@ cat > "$CONFIG" <<EOF
 
 tunnel: $TUNNEL_ID
 credentials-file: $CRED
+
+# 传输协议：走 http2（TCP:7844），**特意不用 cloudflared 的 quic 默认值**。
+#
+# 为什么：QUIC 走 UDP:7844，这台机器的网络路径对它极不友好。实测 /tmp/cfd-tunnel.log
+# 里几乎全是 QUIC 的 "timeout: no recent network activity"，24 小时内 Connection
+# terminated 上千次，而且是 4 条 HA 连接**同时**掉、重连还带退避 —— 空窗期访客
+# 看到的就是 Cloudflare Error 1033（隧道连不上边缘，跟 8787 上的服务无关）。
+# 2026-10-12 早上就是这样：00:59Z 全掉，01:14Z 才重连上，中间 15 分钟打不开。
+# 换成 http2 走 TCP，丢包由 TCP 重传兜住，对这种网络稳得多。
+#
+# 只能写在配置文件里：该版 cloudflared 的 \`tunnel run\` 已经没有 --protocol 开关了
+# （2026.9.1 的 --help 里查不到），所以**不要去给 plist 加参数**，那会让服务起不来。
+# 想回到默认行为：重跑本脚本时带 PROTOCOL=quic。
+protocol: ${PROTOCOL}
 
 # 固定监控端口。tools/share-url.sh 靠它判断"隧道是否真的连上了 Cloudflare"——
 # 地址分配出来 ≠ 握手完成，这中间去访问会得到 502，容易被误当成配置错误（踩过）。

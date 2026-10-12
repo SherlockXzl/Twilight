@@ -185,6 +185,12 @@ def main() -> int:
                       f"service: http://127.0.0.1:{port}" in text)
                 check("config.yml 固定了 metrics 端口（share-url.sh 依赖它）",
                       "metrics: 127.0.0.1:20241" in text)
+                # 协议钉在 config.yml 里，**不是 plist 参数**：这台机器的网络对
+                # QUIC/UDP 不稳，会被反复掐断成 Cloudflare Error 1033。
+                # 而该版 cloudflared 的 `tunnel run` 已无 --protocol 开关，
+                # 所以这是唯一的着力点 —— 别哪天"顺手删冗余配置"给删了。
+                check("config.yml 用 http2 而不是默认的 quic",
+                      "protocol: http2" in text, text[:300])
 
                 # ingress 顺序：hostname 规则在前，兜底 404 必须在最后一条。
                 lines = [l.strip() for l in text.splitlines()]

@@ -267,7 +267,7 @@ tail -f /tmp/cfd-tunnel.log # 隧道自己的日志
 launchctl list | grep chenhunxian
 ```
 
-两个容易踩的点：
+几个容易踩的点：
 
 1. **本机 DNS 被代理接管成 fake-ip（`198.18.x.x`）**，直接 `curl 域名` 永远不通，
    会被误判成"隧道坏了"。必须先经 DoH 拿真实 IP 再 `curl --resolve`。
@@ -278,6 +278,28 @@ launchctl list | grep chenhunxian
 3. **刚写入的 DNS 记录不会立刻解析出来**（实测约 1~5 分钟），而且本机路由器还会缓存
    着注册域名之前的 NXDOMAIN。所以 `tunnel-setup.sh` 的端到端验证带 3 轮重试，
    别急着判定配置失败。
+4. **页面报 `Error 1033 / Cloudflare Tunnel error` = 隧道连不上 Cloudflare，不是回源问题。**
+   截图里那句 "Cloudflare is currently unable to resolve it" 说的是隧道**没有活着的连接器**，
+   跟 8787 上的服务健不健康完全无关 —— 别去重跑数据生成脚本。
+   此时先看 `http://127.0.0.1:20241/metrics` 的 `cloudflared_tunnel_ha_connections`：
+   是 `0` 就是这个问题，非 0 才该怀疑回源。
+
+   这台机器上它是**高频事件**：`grep -c "Connection terminated" /tmp/cfd-tunnel.log` 一天上千次，
+   几乎全是 QUIC 的 `timeout: no recent network activity`，4 条 HA 连接**同时**掉，
+   重连还带退避（2026-10-12 早上 00:59Z 掉、01:14Z 才回来，中间 15 分钟访客看到的就是 1033）。
+   本机网络对 UDP 不友好（同期 `us-movers-live.log` 里也有大量 `IncompleteRead` 佐证），
+   所以 `config.yml` 里钉了 **`protocol: http2`**（走 TCP:7844，丢包由 TCP 重传兜住）。
+
+   注意：**这个键只能写在 `config.yml`**。当前 cloudflared（2026.9.1）的 `tunnel run`
+   已经**没有 `--protocol` 开关**，给 plist 加参数会让服务起不来。改了配置要让隧道重读：
+
+   ```bash
+   # 在你自己的终端里跑（AI 沙箱动不了 launchd）
+   launchctl kickstart -k gui/$(id -u)/com.chenhunxian.us-movers-tunnel
+   ```
+
+   顺带一提，机器上装着 Surge —— 代理的 TUN/增强模式是 UDP/QUIC 被掐的常见来源。
+   如果 http2 之后还频繁断，值得在 Surge 里给 `argotunnel.com`（UDP 7844）放行或直连再看。
 
 ---
 
