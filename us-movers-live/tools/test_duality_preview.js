@@ -228,15 +228,17 @@ setTimeout(() => {
     add("90 天里每只都有 ≥2 个交易日（能画线）", list.every((s) => s.pts.length >= 2));
   }
 
-  // ---------- 切分组：纽约银 × 白银股（2026-10-12 新增）----------
+  // ---------- 切分组：纽约银 × 白银股 / 纽约铜 × 铜股（2026-10-12 新增）----------
   /* 分组是**后端给的**（duality.py 的 GROUPS → payload.groups），页面按它出 tab、
      再按 tab 过滤标的。这一整条链里任何一环断了都不会抛异常 ——
-     症状是"白银那个 tab 点开是空的"或"银的图里混着金价"，只看金价那组永远正常。
-     所以这里真的点一次 tab，看图和表有没有整体换到白银组。 */
+     症状是"某个 tab 点开是空的"或"铜的图里混着银价"，只看金价那组永远正常。
+     所以这里把后加的两组**都真的点一次**，看图、表、勾选卡有没有整体换过去。 */
   const tabsHost = document.getElementById("tabs");
-  add("分组 tab 有两个（纽约金 × 黄金股 / 纽约银 × 白银股）",
-    (txt("tabs").match(/class="tab/g) || []).length === 2 &&
-    txt("tabs").indexOf("纽约银 × 白银股") > 0);
+  add("分组 tab 有三个（纽约金 × 黄金股 / 纽约银 × 白银股 / 纽约铜 × 铜股）",
+    (txt("tabs").match(/class="tab/g) || []).length === 3 &&
+    txt("tabs").indexOf("纽约银 × 白银股") > 0 &&
+    txt("tabs").indexOf("纽约铜 × 铜股") > 0,
+    (txt("tabs").match(/class="tab/g) || []).length);
   add("tab 栏绑了点击处理", !!(tabsHost && tabsHost._h && tabsHost._h.click));
   if (tabsHost && tabsHost._h && tabsHost._h.click) {
     /* 上面那段把 S.custom 置成了 null（那一段只调 compute()，不重画）。
@@ -268,8 +270,39 @@ setTimeout(() => {
       (sTable.match(/<tr>/g) || []).length);
     add("表脚注按分组改口（说的是「纽约银是期货」而不是纽约金）",
       sTable.indexOf("纽约银是期货") > 0);
+
+    // ---------- 再切到纽约铜 × 铜股（同日追加的第三组）----------
+    // 加一组最容易漏的不是配色（配色错了看得见），而是**前后端各改一半**：
+    // 后端加了 group、前端忘了配色 → 静默落到回退板（可能两条线同色）；
+    // 或者 group 字母写错 → 这一组的标的在页面上**一只都不显示**，
+    // 而 tab 是空的还是有的，光看页头看不出来。
+    clickTab("copper");
+    const cPicks = txt("dpPicks");
+    const cChart = txt("dpChart");
+    const cTable = txt("dpTable");
+    add("切到铜组后勾选卡只剩 5 只",
+      (cPicks.match(/class="dp-pick"/g) || []).length === 5,
+      (cPicks.match(/class="dp-pick"/g) || []).length);
+    add("四只铜股都在勾选卡上（江西铜业 / 铜陵有色 / 云南铜业 / 北方铜业）",
+      ["纽约铜", "江西铜业", "铜陵有色", "云南铜业", "北方铜业"]
+        .every((nm) => cPicks.indexOf(nm) > 0));
+    add("金、银两组的标的都没串到铜组里（勾选卡/图/表三处都要换干净）",
+      cPicks.indexOf("紫金矿业") < 0 && cPicks.indexOf("盛达资源") < 0 &&
+      cTable.indexOf("紫金矿业") < 0 && cTable.indexOf("盛达资源") < 0 &&
+      cChart.indexOf('data-k="gold"') < 0 && cChart.indexOf('data-k="silver"') < 0);
+    add("纽约铜（期货）画的是虚线", /data-k="copper"[^>]*stroke-dasharray="6 6"/.test(cChart));
+    add("铜组图里没有 undefined / NaN",
+      cChart.indexOf("undefined") < 0 && cChart.indexOf("NaN") < 0);
+    add("铜组表里有 5 只标的",
+      (cTable.match(/<tr>/g) || []).length === 6,   // 5 行 + 表头
+      (cTable.match(/<tr>/g) || []).length);
+    add("铜组表脚注说的是「纽约铜是期货」",
+      cTable.indexOf("纽约铜是期货") > 0);
+    add("纽约铜报的是**美元/磅**（沿用金银的美元/盎司就是把单位写错了）",
+      cPicks.indexOf("美元/磅") > 0 || cTable.indexOf("美元/磅") > 0);
+
     clickTab("gold");
-    add("切回黄金组恢复 6 只（两组各自独立，不是单向的）",
+    add("切回黄金组恢复 6 只（三组各自独立，不是单向的）",
       (txt("dpPicks").match(/class="dp-pick"/g) || []).length === 6 &&
       txt("dpTable").indexOf("紫金矿业") > 0);
   }

@@ -360,20 +360,20 @@ import importlib  # noqa: E402
 importlib.reload(duality)      # 还原真实配置
 
 real = duality.INSTRUMENTS
-ok("黄金组 6 只 + 白银组 5 只 = 11 只", len(real) == 11, len(real))
+ok("黄金组 6 只 + 白银组 5 只 + 铜组 5 只 = 16 只", len(real) == 16, len(real))
 
 # ---------------------------------------------------------------- 分组（2026-10-12）
 #
 # 分组的失败形态是**静默少一只 / 少一组**：key 写错一个字母不抛异常，
 # 前端按当前分组过滤时那只会被丢掉，图、表看起来都正常。
 # 所以这里把三个方向都钉住：① 每只都属于一个已定义的分组；
-# ② 每组有且只有一个期货；③ 白银组就是用户指定那四只（代码别改错）。
+# ② 每组有且只有一个期货；③ 银组 / 铜组的成员就是用户点名的那几只（代码别改错）。
 group_keys = [g["key"] for g in duality.GROUPS]
 ok("每组标的都挂在一个已定义的分组上",
    all(x["group"] in group_keys for x in real),
    [(x["key"], x["group"]) for x in real if x["group"] not in group_keys])
-ok("分组顺序 = tab 顺序，且当前是黄金组在前、白银组在后",
-   group_keys == ["gold", "silver"], group_keys)
+ok("分组顺序 = tab 顺序（金 → 银 → 铜，后来的排在后面）",
+   group_keys == ["gold", "silver", "copper"], group_keys)
 for gk in group_keys:
     grp = [x for x in real if x["group"] == gk]
     ok("「%s」组有且只有一个期货（两条虚线在图上分不出来）" % gk,
@@ -390,6 +390,21 @@ ok("纽约银走的是 COMEX 白银（101.SI00Y / SI），不是黄金那套代�
    silver[0]["sources"] == [("em", "101.SI00Y"), ("sina_fut", "SI")],
    silver[0]["sources"])
 
+copper = [x for x in real if x["group"] == "copper"]
+ok("铜组就是用户指定的那四只（江西铜业 / 铜陵有色 / 云南铜业 / 北方铜业）",
+   [x["display"] for x in copper[1:]] == ["江西铜业", "铜陵有色", "云南铜业", "北方铜业"],
+   [x["display"] for x in copper[1:]])
+ok("纽约铜走的是 COMEX 铜（101.HG00Y / HG），不是金银那套代码",
+   copper[0]["sources"] == [("em", "101.HG00Y"), ("sina_fut", "HG")],
+   copper[0]["sources"])
+# ⚠️ 计价单位：COMEX 铜报的是**美元/磅**，不是美元/盎司 —— 抄金银那一行最容易错，
+# 而且错了页面不会报错，只会把 6.7 显示成"6.7 美元/盎司"（没人会去核）。
+ok("纽约铜的单位是 美元/磅（不是沿用金银的 美元/盎司）",
+   copper[0]["unit"] == "美元/磅", copper[0]["unit"])
+ok("期货的单位都不为空（页面直接把它印在价格后面）",
+   all(x["unit"] for x in real if x["kind"] == "future"),
+   [x["unit"] for x in real if x["kind"] == "future"])
+
 
 def _same_stock(x):
     """同一条源链上的两个源必须指向**同一只票** —— 市场前缀要配套、代码要一致。
@@ -397,7 +412,7 @@ def _same_stock(x):
     这类错**不会抛异常**：东财 `1.001337` 只会回一句"没有K线"，腾讯 `sh001337`
     也只会返回空数组，最后表现为"这只票取不到"。排查时容易去怀疑网络，
     而其实是配置里少改了一位市场前缀（2026-10-08 加四川黄金时就要判它属深市）。
-    期货不适用（纽约金 / 纽约银走的是新浪外盘 sina_fut，没有 tencent 源），直接放过。"""
+    期货不适用（纽约金 / 银 / 铜走的是新浪外盘 sina_fut，没有 tencent 源），直接放过。"""
     em = [s[1] for s in x["sources"] if s[0] == "em"]
     tx = [s[1] for s in x["sources"] if s[0] == "tencent"]
     if not em or not tx:
@@ -425,13 +440,14 @@ section("落盘缓存降级：按当前配置对齐")
 old_items = [
     {"key": "gold", "name": "纽约金", "dates": [], "closes": [], "chgs": []},
     {"key": "silver", "name": "纽约银", "dates": [], "closes": [], "chgs": []},
+    {"key": "copper", "name": "纽约铜", "dates": [], "closes": [], "chgs": []},
     {"key": "早就删掉的", "name": "X"},
 ]
 al = duality._align_stale_items(old_items)
 ok("旧缓存（没有 group）补上各自的分组",
-   [x.get("group") for x in al] == ["gold", "silver"], al)
+   [x.get("group") for x in al] == ["gold", "silver", "copper"], al)
 ok("配置里已经没有的标的从降级数据里剔掉（不然它会带着回退色出现在图上）",
-   [x["key"] for x in al] == ["gold", "silver"], [x["key"] for x in al])
+   [x["key"] for x in al] == ["gold", "silver", "copper"], [x["key"] for x in al])
 ok("补的是**当前**配置里的分组，不是照抄缓存",
    all(x["group"] == next(s["group"] for s in real if s["key"] == x["key"]) for x in al))
 
