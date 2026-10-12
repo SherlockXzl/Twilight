@@ -92,6 +92,10 @@ run "明暗对照映射数据（与目录同源 / 引用完整）" "$PY" tools/t
 run "A 股映射悬停卡（渲染 / 定位 / 悬停行为）" "$NODE" tools/test_biztip.js
 run "早盘总结 A 股映射悬停（触发点 / 预热 / 旧服务）" "$NODE" tools/test_morning_biztip.js
 run "驱动原因 / A 股映射（字段透传）" "$PY"   tools/test_reasons.py
+run "期股双面（区间 / 基准 / 勾选 / 跨文件版本握手）" "$NODE" tools/test_duality.js
+run "期股双面渲染（SVG 拼接 / 长假边界 / 交互重画）" "$NODE" tools/test_duality_render.js
+run "期股双面数据源（源链 / 失败记忆过期 / 归一化）" "$PY" tools/test_duality_source.py
+run "期股双面静态预览页（离线打开 / 图与表 / 长假提示）" "$NODE" tools/test_duality_preview.js
 run "外壳：轮询调度与页头"           "$NODE" tools/test_polling.js
 run "早盘总结页头（daily 模式）"     "$NODE" tools/test_daily_header.js
 run "早盘总结草稿 / 偏旧提示"         "$NODE" tools/test_morning_draft.js

@@ -699,3 +699,110 @@ table.t-catalog tbody tr{content-visibility:auto;contain-intrinsic-size:auto 41p
   .sm-m{flex:1 1 100%}
 }
 
+
+/* ==================================================================
+   「期股双面」页（static/duality.html + duality.js）
+   ------------------------------------------------------------------
+   这一页只有三类控件：时间范围、标的多选、折线图。样式全部另起一套 .dp-*，
+   **不复用 .tabs--filter** —— 那套的 :before 会硬写一个「分档」前缀，
+   而这里选的是时间而不是分档。控件的长相（药丸 chip、实心选中）保持一致即可，
+   两处说的本来也不是同一件事。
+   ================================================================== */
+
+.dp-bar{display:flex;flex-wrap:wrap;align-items:center;gap:10px;margin-bottom:14px}
+.dp-ranges{display:flex;flex-wrap:wrap;gap:7px}
+/* 选中 = 实心蓝，与「分档」chip 同一套视觉语言：都表示"这个条件开着" */
+.dp-ranges .tab{border-color:#dbe2ea;background:transparent;border-radius:999px;
+  padding:6px 15px;font-size:var(--fs-2);color:var(--ink2);
+  transition:background .12s,border-color .12s,color .12s}
+.dp-ranges .tab:hover{border-color:#b9c4d0;color:var(--ink)}
+.dp-ranges .tab.on,
+.dp-ranges .tab.on:hover{background:var(--blue);border-color:var(--blue);color:#fff;font-weight:500}
+/* 自定义区间：只在选中「自定义」时出现，所以它自己不需要"隐藏态"样式 */
+.dp-custom{display:flex;align-items:center;gap:8px;font-size:var(--fs-2);color:var(--ink3)}
+.dp-custom input[type=date]{font:inherit;font-size:var(--fs-2);padding:6px 9px;
+  border:1px solid var(--line);border-radius:8px;background:var(--card);color:var(--ink)}
+/* 原先这里有个 `.dp-reload{margin-left:auto}` —— 内容区那个「重新取数」按钮
+   2026-10-08 按用户要求搬到页头了（现在叫「立即刷新」，id=duRefresh，样式复用
+   .primary）。这一条随之删掉：留着它没有元素可命中，而且下次有人加控件进来
+   会被这条"幽灵规则"莫名推到最右。 */
+
+/* ---------- 标的多选卡（同时充当图例）---------- */
+/* 每张卡上有色点、名称、最新价、**区间涨跌幅** —— 图上因此不再另画一套图例：
+   同一件事写两遍，读者还得自己对颜色。 */
+.dp-picks{display:flex;flex-wrap:wrap;gap:9px;margin-bottom:18px}
+.dp-pick{display:flex;align-items:center;gap:9px;border:1px solid var(--line);
+  border-radius:10px;background:var(--card);padding:10px 14px;cursor:pointer;
+  user-select:none;transition:opacity .12s,border-color .12s}
+.dp-pick:hover{border-color:#c3cad3}
+/* 取消勾选 = 压暗，不是隐藏 —— 卡片要留在原处，否则点一下整排会跳位 */
+.dp-pick.off{opacity:.5}
+.dp-pick input{width:15px;height:15px;margin:0;cursor:pointer;accent-color:var(--blue);flex:0 0 auto}
+/* 图例里的小色块（在勾选卡上）。做成**线段**而不是圆点：图上期货是虚线、
+   股票是实线，图例若还是一个圆点，线型这件事就只存在于图上，看的人得回图里猜。
+   虚线段由 JS 用 repeating-linear-gradient 拼（见 paintPicks）。 */
+.dp-key{width:16px;height:3px;border-radius:2px;display:inline-block;flex:0 0 auto}
+/* 这个圆点只给悬停提示框用了 —— 那是"一行一个标记"，圆点比线段合适 */
+.dp-dot{width:9px;height:9px;border-radius:50%;display:inline-block;flex:0 0 auto}
+.dp-pick-n{font-size:var(--fs-3);font-weight:500;color:var(--ink)}
+.dp-pick-p{font-size:var(--fs-2);color:var(--ink3);font-variant-numeric:tabular-nums}
+.dp-pick-c{font-size:var(--fs-3);font-weight:600;font-variant-numeric:tabular-nums}
+
+/* ---------- 折线图 ---------- */
+/* .dp-chart 是定位参照：悬停提示框（.dp-tip）按鼠标坐标绝对定位在它里面。
+   注意 overflow **不能**设 hidden —— 贴边的提示框会被裁掉。 */
+.dp-chart{position:relative;width:100%}
+.dp-svg{display:block;max-width:100%}
+/* SVG 里的文字不继承 body 的字体族（要显式给），字号也必须用 px：
+   SVG 的 font-size 不认 CSS 变量里的 px 缩写以外的相对单位。 */
+.dp-svg text{font-family:inherit}
+.dp-ax{font-size:12px;fill:var(--ink3)}
+/* 悬停时贴在被吸附那条线旁边的名称。白描边用 paint-order:stroke 实现
+   （先描白边、再填字），密集线条上也读得清。
+   **这里绝不能写 fill** —— CSS 声明压得过 SVG 的 fill 属性，
+   一写就会把 JS 传进来的线色顶掉，六条线的标签全变成同一个颜色。 */
+.dp-tag{font-size:12.5px;font-weight:600;stroke:#fff;stroke-width:3.2;
+  paint-order:stroke;stroke-linejoin:round}
+.dp-empty{padding:56px 20px;text-align:center;color:var(--ink3);font-size:var(--fs-3);
+  background:#fafbfd;border:1px dashed var(--line);border-radius:10px}
+/* 「区间内交易日太少」的提醒。用 .panel.warn 那套黄底 —— 全站"这份数据要留意"
+   是同一个意思，不该在每页造一种新黄。 */
+.dp-warn{margin:0 0 12px;padding:9px 13px;border-radius:8px;
+  background:#fff8ea;border:1px solid #f0dcb4;color:#6b4a00;
+  font-size:var(--fs-2);line-height:1.7}
+.dp-note{margin:12px 0 0;font-size:var(--fs-1);color:var(--ink3);line-height:1.75}
+
+.dp-tip{position:absolute;z-index:20;display:none;pointer-events:none;
+  background:rgba(255,255,255,.97);border:1px solid var(--line);border-radius:9px;
+  padding:9px 12px;box-shadow:0 6px 18px rgba(22,25,29,.14);
+  font-size:var(--fs-2);min-width:236px}
+.dp-tip-d{font-weight:600;color:var(--ink);margin-bottom:6px}
+.dp-tip-r{display:flex;align-items:center;gap:8px;line-height:1.95;white-space:nowrap}
+/* 悬停时"鼠标正指着的那条线"在提示框里的样子。底色 + 名称加粗即可，
+   不加边框也不换色 —— 这行左侧的色点已经带着那只票的颜色，再叠一层会打架。
+   padding 与 margin 数值相抵：底色块往外扩 5px 的同时**横向对齐分毫不动**，
+   六行的圆点必须严格在同一列上，错开一点就会被看出来。 */
+.dp-tip-r--on{background:#eef3fd;border-radius:6px;padding:0 5px;margin:0 -5px}
+.dp-tip-r--on .dp-tip-n{color:var(--ink);font-weight:600}
+.dp-tip-n{flex:1 1 auto;color:var(--ink2)}
+/* 小一号、浅一档的补充信息 —— 两种情况：这只标的的**稳定标识**
+   （A 股 6 位证券代码 / 期货的市场名），以及该行数据**实际取自哪一天**
+   （当天休市时用的是更早一个交易日）。两者都不是与名称并列的第二条信息，
+   所以压暗压小，只是帮人确认"我指的是不是它"。 */
+.dp-tip-c,.dp-tip-when{color:var(--ink3);font-size:var(--fs-1);font-weight:400;margin-left:6px}
+.dp-tip-v{font-variant-numeric:tabular-nums;color:var(--ink)}
+.dp-tip-p{font-weight:600;font-variant-numeric:tabular-nums;min-width:56px;text-align:right}
+
+/* ---------- 区间数据表 ---------- */
+/* 全站 table 默认 min-width:1160px（那是给异动榜那种宽表的），
+   这张只有 8 列、字段又都很短，沿用 1160 会白白撑出一条横向滚动条。 */
+table.t-dual{min-width:860px}
+table.t-dual td .dp-dot{margin-right:7px}
+.dp-sub{color:var(--ink3);font-size:var(--fs-1);font-weight:400}
+
+@media(max-width:760px){
+  .dp-custom{flex-wrap:wrap;gap:6px}
+  .dp-pick{padding:8px 11px;gap:7px}
+  .dp-pick-p{display:none}     /* 窄屏先舍掉价格，色点+名称+涨跌幅才是对比要用的 */
+  table.t-dual{min-width:640px}
+}

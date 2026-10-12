@@ -24,6 +24,11 @@ data/*.bak.*.tgz
 # 全档校验的按日缓存（morning_fetch.py 的 wide_scan 写；可丢，丢了就是重抓一遍）
 data/cache/
 
+# 「期股双面」静态预览页 —— tools/make_duality_preview.py 的生成物。
+# 里面内联了 brand.png 的 base64 和一份 800 根日线的数据快照（近 400 KB），
+# 每次取数后都会变，属于产物不属于源码。要看得自己生成一条。
+duality-preview.html
+
 # `.workbuddy/`（会话与自动化的工作记忆）的忽略规则 2026-09-29 挪到了**仓库根**
 # .gitignore。原因：实际落盘位置是仓库根 Twilight/.workbuddy/，而忽略规则只作用于
 # 「其所在目录及子目录」—— 写在这个子目录里就管不到它，规则一直在却从未生效。

@@ -101,6 +101,23 @@
       '<circle cx="100" cy="46" r="13" fill="currentColor"/>' +
     '</svg>';
 
+  /* 「对照」（期股双面页）。**这一枚不是从位图拟合来的**，是照着 trend 的笔法
+     现画的，所以尺寸与它对齐、也复用同一套描边规则（圆头圆角、currentColor）：
+       - 画布 200x170，不设基线横条 —— trend 那条底座是它的识别特征，
+         这里再放一条，两个图标在侧栏里会认混
+       - 两条折线等宽 16、互相交叉：一条从左上走到右下，一条从左下走到右上。
+         交叉是刻意的：这一页要看的就是"同涨同跌到什么程度"，两条线各走各的
+         反而少了那层意思
+       - 交点落在 x≈70 与 x≈122 之间，不取正中 —— 对称的位置看起来像装饰，
+         偏一点才像两条真实的数据线 */
+  I.chart =
+    '<svg class="icon" viewBox="0 0 200 170" aria-hidden="true" focusable="false">' +
+      '<polyline points="12,130 70,86 122,108 188,30" fill="none" stroke="currentColor"' +
+        ' stroke-width="16" stroke-linecap="round" stroke-linejoin="round"/>' +
+      '<polyline points="12,62 70,102 122,74 188,150" fill="none" stroke="currentColor"' +
+        ' stroke-width="16" stroke-linecap="round" stroke-linejoin="round"/>' +
+    '</svg>';
+
   /** 取图标 SVG 字符串；未知键名返回空串，避免因拼错键名而渲染出 undefined */
   I.get = function (name) { return I[name] || ""; };
 

@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>期股双面</title>
+<!-- 站点图标：与另三页同一张 logo.png，见 shell.js 的说明。 -->
+<link rel="icon" type="image/png" href="logo.png">
+<link rel="apple-touch-icon" href="logo.png">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="app">
+
+  <aside class="sidebar" id="sidebar"></aside>
+
+  <main class="main">
+    <header class="top" id="pageHeader"></header>
+
+    <div class="panel" id="notice" style="display:none"></div>
+
+    <!-- tabs--page：子页面切换器。本页往后还会有别的 tab（用户 2026-10-08 说
+         「其它的 tab 及 tab 下的内容我后续再说」），现在先把容器留在这里，
+         里面只有第一个 tab「纽约金 × 黄金股」—— 由 duality.js 的 NAV 渲染。
+         与夜盘异动页的 tabs--filter（分档筛选）是两种控件，见 style.css 顶部说明。 -->
+    <div class="tabs tabs--page" id="tabs"></div>
+
+    <div id="dualityHost"><div class="empty">加载中…</div></div>
+  </main>
+
+</div>
+<script src="util.js"></script>
+<script src="icons.js"></script>
+<script src="shell.js"></script>
+<script src="duality.js"></script>
+</body>
+</html>

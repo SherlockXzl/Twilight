@@ -1,11 +1,13 @@
 /* 站点外壳 —— 左侧菜单（含站点标） + 页头徽章 + 取数。两个页面共用。
  *
- * 两种模式，由 mount 的 opts.mode 决定：
- *   "live"  （默认，夜盘异动）—— 页头显示 市场状态 / 数据口径 / 取数时间
- *   "daily" （早盘总结）      —— 只读取 /api/morning（每天 06:30 由自动化写入），
- *                                页头显示 市场状态 / 复盘交易日 / 生成时间，**无刷新按钮**
+ * 四种模式，由 mount 的 opts.mode 决定：
+ *   "live"    （默认，夜盘异动）—— 页头显示 市场状态 / 数据口径 / 取数时间
+ *   "daily"   （早盘总结）      —— 只读取 /api/morning（每天 06:30 由自动化写入），
+ *                                  页头显示 市场状态 / 复盘交易日 / 生成时间，**无刷新按钮**
+ *   "catalog" （明暗对照）      —— 展示一份静态目录，数据由页面自己取
+ *   "duality" （期股双面）      —— 黄金 / 白银两组「期货 × 对应股票」的历史日线，数据同样由页面自己取
  *
- * **两个模式都不自动更新数据**（2026-09-22 按用户要求，live 模式当天改）。
+ * **前两个模式都不自动更新数据**（2026-09-22 按用户要求，live 模式当天改）。
  * live 原先是"常规时段每 20 秒轮询 /api/movers"，问题在于那份数据与页面口径是矛盾的：
  * 夜盘异动的口径是「最新一个已完成的美股交易日」，而开市期间抓到的是**当日盘中**涨跌幅，
  * 一只票 10:15 涨 4%、收盘可能跌 2%，名单随时作废还会在读者眼皮底下跳。
@@ -33,7 +35,14 @@
   var NAV = [
     { key: "morning", label: "早盘总结", href: "/morning", icon: "sun",   accent: "#75c82b" },
     { key: "evening", label: "夜盘异动", href: "/",        icon: "moon",  accent: "#75c82b" },
-    { key: "linkage", label: "明暗对照", href: "/linkage", icon: "taiji", accent: "#75c82b" }
+    { key: "linkage", label: "明暗对照", href: "/linkage", icon: "taiji", accent: "#75c82b" },
+    /* 「期股双面」—— 2026-10-08 新增，按用户要求挂在「明暗对照」下方。
+       名字的来由：同一块金子（银子），一面在期货市场报价（纽约金 / 纽约银），
+       一面在股票市场定价（对应的矿股与冶炼股），两面的走势关系才是这一页要看的东西。
+       2026-10-12 加了第二组「纽约银 × 白银股」，切换在页面自己的 tabs--page 上
+       （不在这个侧栏里 —— 侧栏是**页面**级的，分组是页面内的事）。
+       图标用 chart —— 两条线一高一低，正是"对照"这个动作本身。 */
+    { key: "duality", label: "期股双面", href: "/duality", icon: "chart", accent: "#75c82b" }
   ];
 
   /* 2026-09-22 起：**夜盘页不再自动更新数据**（按用户要求）。
@@ -133,6 +142,26 @@
         badges = DOT_BADGE +
           '<span class="badge">收录 <b id="catCount">—</b></span>' +
           '<span class="badge">目录更新 <b id="catTime">—</b></span>';
+      } else if (mode === "duality") {
+        // 「期股双面」：日线序列，数据由页面自己取（服务端有 30 分钟缓存）。
+        //
+        // **取数按钮 2026-10-08 按用户要求搬到这里**（原先在内容区、叫「重新取数」）。
+        // 搬过来之后它和 live 页的按钮**长得一样、叫得也一样**（都是「立即刷新」），
+        // 但 **id 不同、绑的事件也不同** —— live 的 `btnRefresh` 走 `/api/refresh`
+        // 且只在夜盘进行中可点（见 paintRefreshBtn）；这里走 `/api/duality?force=1`，
+        // 任何时刻都能点。复用同一个 id 是危险的：shell 那套「夜盘才可用」的
+        // 逻辑一旦哪天扩到 duality 分支，就会在不声不响中把按钮灰掉、或改掉它的文案。
+        // 所以按钮的**绑定**不在这里做，由 duality.js 自己挂（谁管数据谁绑事件）。
+        badges = '<span class="badge">取数时间 <b id="duTime">—</b></span>' +
+          '<button id="duRefresh" class="primary">立即刷新</button>';
+        //
+        // 徽章 2026-10-08 按用户要求精简成**只剩「取数时间」**。原先三个并排
+        // （市场状态 / 数据截止 / 取数时间），砍掉那两个的道理：
+        //   · 「市场状态」（开市中 / 休市中）说的是"现在美股开不开市" ——
+        //     对一页**历史日线**没有意义，这一页又不自动更新，开不开市都不会让它变一个字；
+        //   · 「数据截止」和 X 轴最后一天是同一个信息，图上本来就有。
+        // 因此这里**不拼 DOT_BADGE**：页头既然没有市场状态元素，
+        // mount 的 duality 分支也就不再启动 statusTimer（见那里的说明）。
       } else {
       badges = DOT_BADGE +
         // 「数据」= 这份快照代表哪个交易日的什么口径（收盘 / 盘中）。**没有倒计时** ——
@@ -560,10 +589,12 @@
 
   function mount(opts) {
     opts = opts || {};
-    // 三种模式：live（夜盘异动，跟着快照取数）/ daily（早盘总结，读一份晨报）/
-    // catalog（明暗对照，展示一份静态目录，取数由页面自己负责）。
+    // 四种模式：live（夜盘异动，跟着快照取数）/ daily（早盘总结，读一份晨报）/
+    // catalog（明暗对照，展示一份静态目录，取数由页面自己负责）/
+    // duality（期股双面：黄金 / 白银两组，历史日线，取数同样由页面自己负责）。
     state.mode = opts.mode === "daily" ? "daily"
-               : opts.mode === "catalog" ? "catalog" : "live";
+               : opts.mode === "catalog" ? "catalog"
+               : opts.mode === "duality" ? "duality" : "live";
     state.onData = opts.onData || null;
     state.onCriteria = opts.onCriteria || null;
     // 重挂载时清掉上一页的口径缓存，避免 A 页拿到 B 页残留的值
@@ -579,6 +610,20 @@
       // 元素不存在时 $() 返回 null，addEventListener 会立刻抛 TypeError 把 mount 打断，
       // 页面就只剩空壳了。（同一个坑见下面 daily 分支的注释，已踩过两次。）
       state.statusTimer = setInterval(loadStatus, STATUS_MS);   // 只刷市场状态徽章
+      return;
+    }
+
+    if (state.mode === "duality") {
+      // 同 catalog：数据（日线）由 duality.js 自己取，壳不管。
+      //
+      // 页头在 duality 模式下**没有 btnRefresh**（那是 live 的按钮，走 /api/refresh）
+      // —— 所以这里绝不能挂它，否则 $() 返回 null、addEventListener 抛 TypeError，
+      // mount 当场中断、页面只剩空壳。页头那个「立即刷新」的 id 是 `duRefresh`，
+      // 它的绑定在 duality.js 里（页面在 Shell.mount 返回之后自己挂，见那里的注释）。
+      //
+      // **不启动 statusTimer**（2026-10-08）：这一页的页头徽章只剩「取数时间」，
+      // 没有市场状态元素可刷，心跳就只是每 60 秒白打一次 /api/status。
+      // 若以后页头要把市场状态加回来，此处同步恢复 setInterval(loadStatus, STATUS_MS)。
       return;
     }
 

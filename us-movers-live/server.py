@@ -36,6 +36,7 @@ from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from zoneinfo import ZoneInfo
 
 import alpaca
+import duality                # 「期股双面」页：纽约金 × 黄金股 / 纽约银 × 白银股的历史日线（多源链，见该模块 docstring）
 import morning_fetch          # 只为复用 last_completed_session()，别让"上一个已完成交易日"出现第二套算法
 import night_fetch
 import providers
@@ -75,6 +76,21 @@ BUSINESS_MAP_PATH = os.path.join(BASE_DIR, "data", "us_business_map.json")
 #: 而不是伪装成「这家公司没有映射数据」。
 BUSINESS_MAP_SCHEMA = 2
 
+#: 「期股双面」响应结构的版本号（前端 counterpart：static/duality.js 的 DUALITY_SCHEMA）。
+#: 同一个用途 —— 服务还跑着旧代码时，页面要能**认出来并直说**，而不是把
+#: 缺字段渲染成"这页没数据"（那是最坏的一种错：不报错、数据其实好好的）。
+#:
+#: v2（2026-10-08）：item 上多了 `marketCap`（总市值，元；期货没有这个字段），
+#: 「区间数据」表据此多一列并按市值重排。**加字段也必须升版本** ——
+#: 旧服务的响应里没有它，新页面不会报错，只会把整列画成"—"、顺序也退回原样，
+#: 看着像"这几只票没有市值"，而实际要做的是重启服务。
+#:
+#: v3（2026-10-12）：页面上多了「纽约银 × 白银股」分组。item 上多了 `group`，
+#: 顶层多了 `groups`（分组的 key 与 tab 文字，前端据此出 tab 并按组过滤标的）。
+#: 同样必须升版本：旧服务的响应里两个字段都没有，新页面会**一个分组都凑不出来**
+#: —— 表格与图全空，而它只是"服务没重启"，重启一下就有。
+DUALITY_SCHEMA = 3
+
 ET = ZoneInfo("America/New_York")
 CST = ZoneInfo("Asia/Shanghai")
 
@@ -111,6 +127,7 @@ PAGE_ROUTES = {
     "/evening": "/index.html",      # 夜盘异动
     "/morning": "/morning.html",    # 早盘总结
     "/linkage": "/linkage.html",    # 明暗对照（全市场美股目录）
+    "/duality": "/duality.html",    # 期股双面（纽约金 × 黄金股 / 纽约银 × 白银股）
 }
 
 #: 站点图标。页面里已用 <link rel="icon"> 指到 logo.png，但浏览器在书签、
@@ -857,6 +874,8 @@ class Handler(SimpleHTTPRequestHandler):
                                # 前端的"场内每次都取数"靠的是 `inSession`，缺了它前端永远
                                # 不认为在场内，**夜盘就不会自动刷新**，而且页面看着一切正常。
                                "snapshot": current_snapshot()})
+        if path == "/api/duality":
+            return self._duality()
         if path == "/api/refresh":
             # ⚠️ do_refresh() **有返回值**（本轮是否成功写入），以前这里是直接丢掉、
             # 只回一份行情，导致前端根本无从判断"这次刷新到底成没成" ——
@@ -912,6 +931,29 @@ class Handler(SimpleHTTPRequestHandler):
                                "missing": missing, "basis": basis})
         return self._json({"ok": True, "quotes": quotes, "missing": missing, "basis": basis,
                            "message": error})
+
+    def _duality(self):
+        """`GET /api/duality` —— 「期股双面」页的历史日线（纽约金 × 黄金股 / 纽约银 × 白银股）。
+
+        **一次给全量**（约 800 根日线 × 11 只，分两组），时间区间由**前端裁**：
+        页面上的 7/30/90/180 天、年初至今、自定义起止日，用的都是同一份数据，
+        切成 30 天还是 180 天没必要再跑一趟网络 —— 那样每次点标签都要等两秒，
+        而且还得为"请求回来时用户已经点了下一个标签"写一套竞态处理。
+        代价是首屏多搬几十 KB（gzip 后约 10KB），换来的是切换零延迟。
+
+        `?force=1` 绕过服务端缓存（页面右上角「立即刷新」用，见 duality.js 的 bindHeaderRefresh）。
+        """
+        qs = urllib.parse.parse_qs(self.path.split("?", 1)[1] if "?" in self.path else "")
+        force = (qs.get("force") or ["0"])[0].strip().lower() not in ("", "0", "false", "no")
+        try:
+            payload = duality.fetch_all(force=force)
+        except Exception as e:                            # noqa: BLE001
+            return self._json({"ok": False, "schema": DUALITY_SCHEMA, "items": [],
+                               "message": "取数出错：%s" % e})
+        payload["schema"] = DUALITY_SCHEMA
+        if not payload.get("ok"):
+            payload["message"] = ("取数失败：" + "；".join(payload.get("errors") or ["未知原因"]))
+        return self._json(payload)
 
     def _movers(self, refresh_ok=None):
         """行情体。`refresh_ok` 只有 `/api/refresh` 会传 —— 表示**本轮刷新**的成败，
