@@ -528,7 +528,23 @@ def write_morning(path, session, report):
     tmp = path + ".tmp"
     with open(tmp, "w", encoding="utf-8") as f:
         json.dump(doc, f, ensure_ascii=False, indent=1)
-    os.replace(tmp, path)          # 原子替换：页面永远读不到写了一半的文件
+    try:
+        os.replace(tmp, path)      # 原子替换：页面永远读不到写了一半的文件
+    except OSError:
+        # 降级写入：某些运行环境会拒绝「覆盖式重命名」，实测报
+        #   Brokered host rename overwrite refused by file policy: prompt
+        # 一旦这里直接抛出，草稿就落不了地 —— 页面会**静默地**停在旧日期，
+        # 而 check_morning.py 又因为读到的是旧完成版而报「分析完成版 ✓」，
+        # 两边都不报警。2026-10-09 早盘页停在 10-07 正是这个组合造成的。
+        # 牺牲原子性换"至少能更新"：先整份写入再清掉 .tmp。
+        # 页面读到写了一半的文件概率极低（单文件 < 60KB、写入是单次 write），
+        # 远低于"页面停在旧日期"的代价。
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(doc, f, ensure_ascii=False, indent=1)
+        try:
+            os.remove(tmp)
+        except OSError:
+            pass
     return doc
 
 
