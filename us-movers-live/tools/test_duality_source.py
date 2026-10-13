@@ -8,7 +8,7 @@
 
 所以这里钉五件事：
 
-  1. **谁通用谁**：主源失败要能自动落到备源，十一只标的互不牵连；
+  1. **谁通用谁**：主源失败要能自动落到备源，十八只标的互不牵连；
   2. **失败记忆**：主源连续失败后别再每次去撞墙（首屏等着呢）；
   3. **记忆必须会过期**：否则"这次限流"会变成"这辈子都不再用它" ——
      备源一直成功，主源永远等不到清零的那次成功，这是个死锁，不是优化；
@@ -360,20 +360,21 @@ import importlib  # noqa: E402
 importlib.reload(duality)      # 还原真实配置
 
 real = duality.INSTRUMENTS
-ok("黄金组 6 只 + 白银组 5 只 + 铜组 5 只 = 16 只", len(real) == 16, len(real))
+ok("黄金组 6 只 + 白银组 5 只 + 铜组 5 只 + 橡胶组 2 只 = 18 只", len(real) == 18, len(real))
 
 # ---------------------------------------------------------------- 分组（2026-10-12）
 #
 # 分组的失败形态是**静默少一只 / 少一组**：key 写错一个字母不抛异常，
 # 前端按当前分组过滤时那只会被丢掉，图、表看起来都正常。
-# 所以这里把三个方向都钉住：① 每只都属于一个已定义的分组；
-# ② 每组有且只有一个期货；③ 银组 / 铜组的成员就是用户点名的那几只（代码别改错）。
+# 所以这里把四个方向都钉住：① 每只都属于一个已定义的分组；
+# ② 每组有且只有一个期货；③ 每组至少有一只股票；④ 银组 / 铜组 / 胶组的成员
+# 就是用户点名的那几只（代码别改错）。
 group_keys = [g["key"] for g in duality.GROUPS]
 ok("每组标的都挂在一个已定义的分组上",
    all(x["group"] in group_keys for x in real),
    [(x["key"], x["group"]) for x in real if x["group"] not in group_keys])
-ok("分组顺序 = tab 顺序（金 → 银 → 铜，后来的排在后面）",
-   group_keys == ["gold", "silver", "copper"], group_keys)
+ok("分组顺序 = tab 顺序（金 → 银 → 铜 → 沪胶，后来的排在后面）",
+   group_keys == ["gold", "silver", "copper", "rubber"], group_keys)
 for gk in group_keys:
     grp = [x for x in real if x["group"] == gk]
     ok("「%s」组有且只有一个期货（两条虚线在图上分不出来）" % gk,
@@ -381,6 +382,11 @@ for gk in group_keys:
        [x["key"] for x in grp])
     ok("「%s」组的期货排在该组第一位（勾选卡与图例按这个顺序读）" % gk,
        grp[0]["kind"] == "future", [x["key"] for x in grp])
+    # 只有期货就不叫"期股双面"了 —— 一条孤零零的虚线没什么可对照的。
+    # 橡胶组只有 2 只，这条对它尤其有意义（少配一只就直接不成立了）。
+    ok("「%s」组至少有一只股票（否则这一组不成其为期股双面）" % gk,
+       any(x["kind"] == "stock" for x in grp),
+       [x["key"] for x in grp if x["kind"] == "stock"])
 
 silver = [x for x in real if x["group"] == "silver"]
 ok("白银组就是用户指定的那四只（湖南白银 / 白银有色 / 豫光金铅 / 盛达资源）",
@@ -401,6 +407,37 @@ ok("纽约铜走的是 COMEX 铜（101.HG00Y / HG），不是金银那套代码"
 # 而且错了页面不会报错，只会把 6.7 显示成"6.7 美元/盎司"（没人会去核）。
 ok("纽约铜的单位是 美元/磅（不是沿用金银的 美元/盎司）",
    copper[0]["unit"] == "美元/磅", copper[0]["unit"])
+
+rubber = [x for x in real if x["group"] == "rubber"]
+# ⚠️ 这是本页**唯一"只有一只股票"的分组**，所以这里钉的是"恰好这两只"，
+# 而不是像另外三组那样列一串股票名。它不是配置写漏：天然橡胶在 A 股是独苗，
+# 海南橡胶几乎是唯一的种植端标的（轮胎等下游与胶价是**反向**的成本关系，
+# 不属于这一组）。哪天有人"顺手补几只橡胶概念股"，这条会先把他拦下来。
+ok("橡胶组恰好 2 只：沪胶 + 海南橡胶（唯一只有一只股票的分组）",
+   [x["display"] for x in rubber] == ["沪胶", "海南橡胶"],
+   [x["display"] for x in rubber])
+ok("沪胶走的是上期所主连（东财 113.RUM / 新浪**内盘** RU0），不是外盘那套 symbol",
+   rubber[0]["sources"] == [("em", "113.RUM"), ("sina_inner", "RU0")],
+   rubber[0]["sources"])
+# 东财那个代码不按"品种码 + 0"的习惯：`113.RU0` / `113.RU00` 实测都不是有效代码，
+# 东财只认 `113.RUM`（名称回「橡胶主连」）。写成 RU0 时表现为"主源取不到、落到备源"，
+# 页面照样有数据 —— 于是这个错会一直藏着，直到备源也挂的那天才暴露。
+ok("东财代码用的是 113.RUM（RU0 / RU00 都不是有效代码，藏着不报错）",
+   rubber[0]["sources"][0][1] == "113.RUM", rubber[0]["sources"][0][1])
+# ⚠️ 计价单位：沪胶是**国内盘**，报的是元/吨 —— 抄金银铜那三行的
+# "美元/盎司""美元/磅"会得到一句显然错误的话，而且不会报错。
+# 这是本页第一个（目前也是唯一）非美元计价的期货。
+ok("沪胶的单位是 元/吨（不是美元/盎司，也不是美元/磅）",
+   rubber[0]["unit"] == "元/吨", rubber[0]["unit"])
+ok("沪胶是唯一的国内盘（market 是上期所，不是 COMEX）",
+   rubber[0]["market"] == "上期所", rubber[0]["market"])
+# 内盘 / 外盘是**两个不同的新浪接口**（域名、symbol、字段名全不一样）。
+# 把沪胶的备源写成 sina_fut 不会报错：主源正常时永远用不到它，
+# 等主源挂掉的那天才表现为"这个源取不到" —— 最典型的潜伏型错误。
+ok("沪胶用的是内盘源 sina_inner，与外盘源 sina_fut 是两个源（不是同一个函数换个参数）",
+   rubber[0]["sources"][1][0] == "sina_inner" and
+   duality.SRC_FUNCS["sina_inner"] is not duality.SRC_FUNCS["sina_fut"],
+   rubber[0]["sources"])
 ok("期货的单位都不为空（页面直接把它印在价格后面）",
    all(x["unit"] for x in real if x["kind"] == "future"),
    [x["unit"] for x in real if x["kind"] == "future"])
@@ -412,7 +449,8 @@ def _same_stock(x):
     这类错**不会抛异常**：东财 `1.001337` 只会回一句"没有K线"，腾讯 `sh001337`
     也只会返回空数组，最后表现为"这只票取不到"。排查时容易去怀疑网络，
     而其实是配置里少改了一位市场前缀（2026-10-08 加四川黄金时就要判它属深市）。
-    期货不适用（纽约金 / 银 / 铜走的是新浪外盘 sina_fut，没有 tencent 源），直接放过。"""
+    期货不适用（黄金 / 白银 / 铜走的是新浪外盘 sina_fut、沪胶走的是新浪内盘 sina_inner，
+    两者都没有 tencent 源），直接放过。"""
     em = [s[1] for s in x["sources"] if s[0] == "em"]
     tx = [s[1] for s in x["sources"] if s[0] == "tencent"]
     if not em or not tx:
@@ -441,13 +479,14 @@ old_items = [
     {"key": "gold", "name": "纽约金", "dates": [], "closes": [], "chgs": []},
     {"key": "silver", "name": "纽约银", "dates": [], "closes": [], "chgs": []},
     {"key": "copper", "name": "纽约铜", "dates": [], "closes": [], "chgs": []},
+    {"key": "ru", "name": "沪胶", "dates": [], "closes": [], "chgs": []},
     {"key": "早就删掉的", "name": "X"},
 ]
 al = duality._align_stale_items(old_items)
 ok("旧缓存（没有 group）补上各自的分组",
-   [x.get("group") for x in al] == ["gold", "silver", "copper"], al)
+   [x.get("group") for x in al] == ["gold", "silver", "copper", "rubber"], al)
 ok("配置里已经没有的标的从降级数据里剔掉（不然它会带着回退色出现在图上）",
-   [x["key"] for x in al] == ["gold", "silver", "copper"], [x["key"] for x in al])
+   [x["key"] for x in al] == ["gold", "silver", "copper", "ru"], [x["key"] for x in al])
 ok("补的是**当前**配置里的分组，不是照抄缓存",
    all(x["group"] == next(s["group"] for s in real if s["key"] == x["key"]) for x in al))
 

@@ -342,7 +342,7 @@ const palKeys = palBlock
   ? (palBlock[1].match(/^\s*([a-z0-9_]+):\s*"#/gm) || [])
     .map(function (s) { return s.trim().replace(/:.*$/, ""); })
   : [];
-ok("抓到了标的清单（正则若失配，下面两条会变成永远为真）", pyKeys.length >= 16,
+ok("抓到了标的清单（正则若失配，下面两条会变成永远为真）", pyKeys.length >= 18,
   pyKeys.join(","));
 ok("后端每只标的都在前端调色板里有固定色",
   pyKeys.every(function (k) { return palKeys.indexOf(k) >= 0; }),
@@ -433,19 +433,20 @@ ok("图例里的虚线段用 repeating-linear-gradient 拼（段长与间隙是�
 
 /* ============================================================ 分组（2026-10-12）
  *
- * 页面上多了「纽约银 × 白银股」，同日又加了「纽约铜 × 铜股」。这一改动的
- * **失败形态特别隐蔽**：分组 key 写错一个字母、或者某一组压根没有期货，
+ * 页面上先多了「纽约银 × 白银股」，同日又加了「纽约铜 × 铜股」与「沪胶 × 橡胶股」。
+ * 这一改动的**失败形态特别隐蔽**：分组 key 写错一个字母、或者某一组压根没有期货，
  * 都不会抛异常 —— 前端按当前分组过滤，结果是"这一组少了一只 / 少了一条线"，
  * 而图、表、勾选卡全都长得像正常的。
  *
- * 分两层守：① 读源码，三组定义与标的归属对得上；
+ * 分两层守：① 读源码，四组定义与标的归属对得上；
  *          ② 真的调一次 groupItems()，看过滤是不是按 payload.groups 走的。 */
 const groupBlock = /^GROUPS = \[([\s\S]*?)^\]/m.exec(dsPy);
 const groupKeys = groupBlock
   ? (groupBlock[1].match(/"key":\s*"([a-z0-9_]+)"/g) || [])
     .map(function (s) { return s.replace(/.*"([a-z0-9_]+)"$/, "$1"); })
   : [];
-ok("duality.py 里定义了分组（金 / 银 / 铜三组）", groupKeys.length >= 3, groupKeys.join(","));
+ok("duality.py 里定义了分组（金 / 银 / 铜 / 沪胶四组）", groupKeys.length >= 4,
+  groupKeys.join(","));
 
 const itemGroups = (insBlock
   ? (insBlock[1].match(/"group":\s*"([a-z0-9_]+)"/g) || []) : [])
@@ -457,12 +458,19 @@ ok("每只标的都挂在一个**已定义**的分组上（写错会静默少一
   itemGroups.join(","));
 
 /* 每组都要有且只有一个期货 —— 这一页就叫"期股双面"，一组里没有期货就只是一张
-   普通的多股对比图；有两个则两条虚线在图上没法区分。 */
+   普通的多股对比图；有两个则两条虚线在图上没法区分。
+
+   ⚠️ 2026-10-12（加橡胶组时）改过一次写法：原来数的是
+   `/"key": "..."[\s\S]*?"kind": "future"/`，靠**惰性匹配的副作用**统计 ——
+   它的值实际取决于"各组的期货排在第几"，当时恰好等于组数（3），纯粹是巧合。
+   现在直接数 `"kind": "future"` 的个数：语义一样，但不会因为"新加的组排最后"
+   就被算漏或多算。"每组**恰好**一条"这一层由 test_duality_source.py
+   按组循环守着（那条更严）。 */
 const pyFutures = insBlock
-  ? (insBlock[1].match(/"key":\s*"[a-z0-9_]+"[\s\S]*?"kind":\s*"future"/g) || []).length
+  ? (insBlock[1].match(/"kind":\s*"future"/g) || []).length
   : 0;
-ok("每组一条期货（组数 = 期货数 = 3，一条线一个品种）",
-  pyFutures === groupKeys.length && pyFutures === 3, pyFutures);
+ok("期货条数 = 分组数 = 4（每组一条，一条线一个品种）",
+  pyFutures === groupKeys.length && pyFutures === 4, pyFutures);
 
 /* —— 真的过滤一次（读源码守不住"过滤写错了"这类事）—— */
 const SAVED = { payload: S.payload, items: S.items, tab: S.tab };
@@ -470,7 +478,8 @@ S.payload = {
   generatedAt: TODAY + " 14:30:00",
   groups: [{ key: "gold", label: "纽约金 × 黄金股" },
            { key: "silver", label: "纽约银 × 白银股" },
-           { key: "copper", label: "纽约铜 × 铜股" }]
+           { key: "copper", label: "纽约铜 × 铜股" },
+           { key: "rubber", label: "沪胶 × 橡胶股" }]
 };
 S.items = [
   { key: "gold", name: "纽约金", kind: "future", group: "gold", dates: [], closes: [], chgs: [] },
@@ -478,7 +487,9 @@ S.items = [
   { key: "silver", name: "纽约银", kind: "future", group: "silver", dates: [], closes: [], chgs: [] },
   { key: "sdzy", name: "盛达资源", kind: "stock", group: "silver", dates: [], closes: [], chgs: [] },
   { key: "copper", name: "纽约铜", kind: "future", group: "copper", dates: [], closes: [], chgs: [] },
-  { key: "jxty", name: "江西铜业", kind: "stock", group: "copper", dates: [], closes: [], chgs: [] }
+  { key: "jxty", name: "江西铜业", kind: "stock", group: "copper", dates: [], closes: [], chgs: [] },
+  { key: "ru", name: "沪胶", kind: "future", group: "rubber", dates: [], closes: [], chgs: [] },
+  { key: "hnxj", name: "海南橡胶", kind: "stock", group: "rubber", dates: [], closes: [], chgs: [] }
 ];
 S.tab = "silver";
 ok("切到白银组时只留白银组的三只（金价不会混进银的图里）",
@@ -486,16 +497,25 @@ ok("切到白银组时只留白银组的三只（金价不会混进银的图里�
   D.groupItems().map(function (it) { return it.key; }).join(","));
 ok("白银组的期货名按分组取（图注里那句「纽约银与股价量纲不同」）",
   D.futureName() === "纽约银", D.futureName());
-ok("组数就是 tab 数（后端加一组 = 页面多一个 tab）", D.groups().length === 3,
+ok("组数就是 tab 数（后端加一组 = 页面多一个 tab）", D.groups().length === 4,
   D.groups().length);
 S.tab = "copper";
-ok("切到铜组后金、银两组的标的都不见了（三组互不串台）",
+ok("切到铜组后金、银两组的标的都不见了（各组互不串台）",
   D.groupItems().map(function (it) { return it.key; }).join(",") === "copper,jxty",
   D.groupItems().map(function (it) { return it.key; }).join(","));
 ok("铜组的期货名按分组取（「纽约铜与股价量纲不同」，不是写死的金/银）",
   D.futureName() === "纽约铜", D.futureName());
+/* 橡胶组是**本页第一个只有 2 只标的的分组**（沪胶 + 海南橡胶）。
+   它要守的恰好是"渲染没有写死只数"：过滤后就是这 2 只，不多不少 ——
+   如果哪次改动偷偷按 5~6 只去处理，这里会立刻露馅。 */
+S.tab = "rubber";
+ok("切到橡胶组只剩 2 只（唯一只有一只股票的分组，不许多也不许少）",
+  D.groupItems().map(function (it) { return it.key; }).join(",") === "ru,hnxj",
+  D.groupItems().map(function (it) { return it.key; }).join(","));
+ok("橡胶组的期货名按分组取（「沪胶与股价量纲不同」——不是纽约金/银/铜）",
+  D.futureName() === "沪胶", D.futureName());
 S.tab = "gold";
-ok("切回黄金组只留黄金组（三组互不串台）",
+ok("切回黄金组只留黄金组（四组互不串台）",
   D.groupItems().map(function (it) { return it.key; }).join(",") === "gold,zijin",
   D.groupItems().map(function (it) { return it.key; }).join(","));
 S.payload = SAVED.payload; S.items = SAVED.items; S.tab = SAVED.tab;

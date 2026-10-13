@@ -228,16 +228,17 @@ setTimeout(() => {
     add("90 天里每只都有 ≥2 个交易日（能画线）", list.every((s) => s.pts.length >= 2));
   }
 
-  // ---------- 切分组：纽约银 × 白银股 / 纽约铜 × 铜股（2026-10-12 新增）----------
+  // ---------- 切分组：白银 / 铜 / 沪胶三组（2026-10-12 一天里加的）----------
   /* 分组是**后端给的**（duality.py 的 GROUPS → payload.groups），页面按它出 tab、
      再按 tab 过滤标的。这一整条链里任何一环断了都不会抛异常 ——
      症状是"某个 tab 点开是空的"或"铜的图里混着银价"，只看金价那组永远正常。
-     所以这里把后加的两组**都真的点一次**，看图、表、勾选卡有没有整体换过去。 */
+     所以这里把后加的三组**都真的点一次**，看图、表、勾选卡有没有整体换过去。 */
   const tabsHost = document.getElementById("tabs");
-  add("分组 tab 有三个（纽约金 × 黄金股 / 纽约银 × 白银股 / 纽约铜 × 铜股）",
-    (txt("tabs").match(/class="tab/g) || []).length === 3 &&
+  add("分组 tab 有四个（纽约金 × 黄金股 / 纽约银 × 白银股 / 纽约铜 × 铜股 / 沪胶 × 橡胶股）",
+    (txt("tabs").match(/class="tab/g) || []).length === 4 &&
     txt("tabs").indexOf("纽约银 × 白银股") > 0 &&
-    txt("tabs").indexOf("纽约铜 × 铜股") > 0,
+    txt("tabs").indexOf("纽约铜 × 铜股") > 0 &&
+    txt("tabs").indexOf("沪胶 × 橡胶股") > 0,
     (txt("tabs").match(/class="tab/g) || []).length);
   add("tab 栏绑了点击处理", !!(tabsHost && tabsHost._h && tabsHost._h.click));
   if (tabsHost && tabsHost._h && tabsHost._h.click) {
@@ -301,8 +302,43 @@ setTimeout(() => {
     add("纽约铜报的是**美元/磅**（沿用金银的美元/盎司就是把单位写错了）",
       cPicks.indexOf("美元/磅") > 0 || cTable.indexOf("美元/磅") > 0);
 
+    // ---------- 再切到沪胶 × 橡胶股（同日追加的第四组，**只有 2 只标的**）----------
+    // 这一组是"唯一只有一只股票"的分组，所以它多守一条别处守不到的：
+    // 勾选卡 / 图 / 表在**只有 2 只**时也得画得出来 —— 任何"按 5~6 只"写死的路径
+    // 在这里都会露馅（比如图例按 6 个槽位预留、或纵轴只统计前 5 条线）。
+    clickTab("rubber");
+    const rPicks = txt("dpPicks");
+    const rChart = txt("dpChart");
+    const rTable = txt("dpTable");
+    add("切到橡胶组后勾选卡只剩 2 只（一胶一股，唯一只有一只股票的分组）",
+      (rPicks.match(/class="dp-pick"/g) || []).length === 2,
+      (rPicks.match(/class="dp-pick"/g) || []).length);
+    add("沪胶与海南橡胶都在勾选卡上",
+      rPicks.indexOf("沪胶") > 0 && rPicks.indexOf("海南橡胶") > 0);
+    add("前三组的标的都没串到橡胶组里（勾选卡/表/图三处都要换干净）",
+      ["紫金矿业", "盛达资源", "江西铜业", "北方铜业"].every((nm) =>
+        rPicks.indexOf(nm) < 0 && rTable.indexOf(nm) < 0) &&
+      ['data-k="gold"', 'data-k="silver"', 'data-k="copper"'].every((k) =>
+        rChart.indexOf(k) < 0));
+    /* 直接比对**图里出现了哪些 key**，而不是数线的条数：
+       单点区间会把 polyline 退化成 circle，数条数会因为"某只票这几天只有 1 个点"
+       而误判。key 集合才是真正想守的东西（不串台、也不漏画）。 */
+    const rKeys = Array.from(new Set((rChart.match(/data-k="[a-z0-9_]+"/g) || [])
+      .map((x) => x.replace(/.*"(.*)"/, "$1")))).sort().join(",");
+    add("橡胶组的图里只有 ru 与 hnxj 两条序列（不串台、也不漏画）",
+      rKeys === "hnxj,ru", rKeys);
+    add("沪胶（期货）画的是虚线", /data-k="ru"[^>]*stroke-dasharray="6 6"/.test(rChart));
+    add("橡胶组图里没有 undefined / NaN",
+      rChart.indexOf("undefined") < 0 && rChart.indexOf("NaN") < 0);
+    add("橡胶组表里有 2 只标的",
+      (rTable.match(/<tr>/g) || []).length === 3,   // 2 行 + 表头
+      (rTable.match(/<tr>/g) || []).length);
+    add("橡胶组表脚注说的是「沪胶是期货」", rTable.indexOf("沪胶是期货") > 0);
+    add("沪胶报的是**元/吨**（沿用金银的美元/盎司或铜的美元/磅都是把单位写错了）",
+      rPicks.indexOf("元/吨") > 0 || rTable.indexOf("元/吨") > 0);
+
     clickTab("gold");
-    add("切回黄金组恢复 6 只（三组各自独立，不是单向的）",
+    add("切回黄金组恢复 6 只（四组各自独立，不是单向的）",
       (txt("dpPicks").match(/class="dp-pick"/g) || []).length === 6 &&
       txt("dpTable").indexOf("紫金矿业") > 0);
   }

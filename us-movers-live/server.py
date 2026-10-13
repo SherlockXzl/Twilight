@@ -36,7 +36,7 @@ from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from zoneinfo import ZoneInfo
 
 import alpaca
-import duality                # 「期股双面」页：金 / 银 / 铜三组「期货 × 对应股票」的历史日线（多源链，见该模块 docstring）
+import duality                # 「期股双面」页：金 / 银 / 铜 / 沪胶四组「期货 × 对应股票」的历史日线（多源链，见该模块 docstring）
 import morning_fetch          # 只为复用 last_completed_session()，别让"上一个已完成交易日"出现第二套算法
 import night_fetch
 import providers
@@ -93,7 +93,10 @@ BUSINESS_MAP_SCHEMA = 2
 #: v4（2026-10-12，同日）：又多了「纽约铜 × 铜股」。**这一次字段没变，照样升版本** ——
 #: 结构没变 ≠ 结果一样：旧服务的 `groups` 里没有铜组，页面会安安静静地只画出两个 tab，
 #: 看不出"第三次改动没生效"。版本号是**内容契约**的一部分，加一组也是改契约。
-DUALITY_SCHEMA = 4
+#:
+#: v5（2026-10-12，同日）：再加「沪胶 × 橡胶股」（沪胶 + 海南橡胶，**只有 2 只标的**，
+#: 且是唯一的国内盘品种）。字段依旧没变；不升的话旧服务只会画出三个 tab。
+DUALITY_SCHEMA = 5
 
 ET = ZoneInfo("America/New_York")
 CST = ZoneInfo("Asia/Shanghai")
@@ -131,7 +134,7 @@ PAGE_ROUTES = {
     "/evening": "/index.html",      # 夜盘异动
     "/morning": "/morning.html",    # 早盘总结
     "/linkage": "/linkage.html",    # 明暗对照（全市场美股目录）
-    "/duality": "/duality.html",    # 期股双面（纽约金 × 黄金股 / 纽约银 × 白银股 / 纽约铜 × 铜股）
+    "/duality": "/duality.html",    # 期股双面（纽约金 × 黄金股 / 纽约银 × 白银股 / 纽约铜 × 铜股 / 沪胶 × 橡胶股）
 }
 
 #: 站点图标。页面里已用 <link rel="icon"> 指到 logo.png，但浏览器在书签、
@@ -937,9 +940,9 @@ class Handler(SimpleHTTPRequestHandler):
                            "message": error})
 
     def _duality(self):
-        """`GET /api/duality` —— 「期股双面」页的历史日线（金 / 银 / 铜三组「期货 × 股票」）。
+        """`GET /api/duality` —— 「期股双面」页的历史日线（金 / 银 / 铜 / 沪胶四组「期货 × 股票」）。
 
-        **一次给全量**（约 800 根日线 × 16 只，分三组），时间区间由**前端裁**：
+        **一次给全量**（约 800 根日线 × 18 只，分四组），时间区间由**前端裁**：
         页面上的 7/30/90/180 天、年初至今、自定义起止日，用的都是同一份数据，
         切成 30 天还是 180 天没必要再跑一趟网络 —— 那样每次点标签都要等两秒，
         而且还得为"请求回来时用户已经点了下一个标签"写一套竞态处理。
