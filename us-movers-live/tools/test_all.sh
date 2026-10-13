@@ -102,6 +102,7 @@ run "早盘总结草稿 / 偏旧提示"         "$NODE" tools/test_morning_draft
 run "早盘总结标签页记忆"             "$NODE" tools/test_morning_tabs.js
 run "后端：夜盘口径（窗口/基准/扫描/冻结）" "$PY" tools/test_night.py
 run "固定链接：命名隧道配置（config.yml + plist）" "$PY" tools/test_tunnel.py
+run "固定链接：隧道看门狗（1033 判据 / 防重启风暴 / plist）" "$PY" tools/test_tunnel_watchdog.py
 
 printf '\n'
 if [ "$fail" = "0" ]; then

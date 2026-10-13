@@ -263,6 +263,7 @@ bash tools/golive.sh
 
 ```bash
 bash tools/share-url.sh     # ① 本机服务在监听？ ② 隧道连着 Cloudflare？ ③ 解析出真实 IP？ ④ 端到端 200？
+bash tools/tunnel-watchdog.sh --status      # 看门狗最近一次的结论（每 5 分钟探一次）
 tail -f /tmp/cfd-tunnel.log # 隧道自己的日志
 launchctl list | grep chenhunxian
 ```
@@ -281,8 +282,12 @@ launchctl list | grep chenhunxian
 4. **页面报 `Error 1033 / Cloudflare Tunnel error` = 隧道连不上 Cloudflare，不是回源问题。**
    截图里那句 "Cloudflare is currently unable to resolve it" 说的是隧道**没有活着的连接器**，
    跟 8787 上的服务健不健康完全无关 —— 别去重跑数据生成脚本。
-   此时先看 `http://127.0.0.1:20241/metrics` 的 `cloudflared_tunnel_ha_connections`：
-   是 `0` 就是这个问题，非 0 才该怀疑回源。
+   此时**以公网那一侧为准**：
+   `curl -s -o /dev/null -w '%{http_code}' https://twilight-market.trade/morning`
+   得到 `530`（响应体 `error code: 1033`）就是这个问题。
+   本机 `http://127.0.0.1:20241/metrics` 的 `cloudflared_tunnel_ha_connections`
+   **只能当旁证，不能当判据** —— 2026-10-13 那次它明明是 `4`（进程活着、socket 也正常），
+   边缘照样报 1033：本地与边缘各说各话。
 
    这台机器上它是**高频事件**：`grep -c "Connection terminated" /tmp/cfd-tunnel.log` 一天上千次，
    几乎全是 QUIC 的 `timeout: no recent network activity`，4 条 HA 连接**同时**掉，
@@ -300,6 +305,31 @@ launchctl list | grep chenhunxian
 
    顺带一提，机器上装着 Surge —— 代理的 TUN/增强模式是 UDP/QUIC 被掐的常见来源。
    如果 http2 之后还频繁断，值得在 Surge 里给 `argotunnel.com`（UDP 7844）放行或直连再看。
+
+#### 隧道看门狗（2026-10-13 起）
+
+上面这类故障其实有**两种形态**，处理方式完全不同：
+
+| 形态 | 本机 metrics | 隧道日志 | 能自愈吗 |
+|---|---|---|---|
+| 连接真的全掉（QUIC 时代） | `ha_connections = 0` | `Connection terminated` 刷屏 | **能** —— cloudflared 自己重连，`KeepAlive` 再兜一层 |
+| **假连接**（http2 时代） | 仍是 `4` | **静默**（最后一次 `Registered` 之后一条 `Lost` 都没有） | **不能** —— 进程没死，`KeepAlive` 没有理由重启它 |
+
+假连接（链路中断后 TCP 半开、本地与边缘状态不一致）只能从外面重建，所以有了看门狗：
+
+```bash
+bash tools/tunnel-watchdog.sh --install   # 写 launchd plist，并打印注册命令
+bash tools/tunnel-watchdog.sh --status    # 最近一次结论（心跳 + 日志 + launchd 状态）
+bash tools/tunnel-watchdog.sh --dry-run   # 只报告，不动手（排障用）
+```
+
+注册后由 launchd **每 300 秒**跑一次：探测 `/morning`，**只有确认 1033 才** `kickstart` 隧道。
+判据是端到端实测公网域名（与 `share-url.sh` 同源，都走 `lib-doh.sh` 解析真实 IP —— 见上面第 1 点）。
+它**刻意不动手**的四种情况：回源 502/504（那是 8787 上的事，重启隧道治不了还盖掉线索）、
+本机连不通、解析不到真实 IP、以及 `530` 但 body 不是 `1033`；
+另外**两次重建之间至少隔 600 秒**，防 Cloudflare 侧的问题导致每 5 分钟重启一次。
+日志 `/tmp/cfd-watchdog.log` **只在异常与动作时写**（健康时保持安静），
+心跳 `/tmp/cfd-watchdog.heartbeat` 每轮覆盖一行，回答"它到底还在不在跑"。
 
 ---
 
@@ -658,7 +688,8 @@ bash tools/test_all.sh          # 一次跑完下面全部（推荐）
 | `test_morning_tabs.js` | 早盘页「总览 / 个股 / 关注」的**标签记忆**：写入、重开后恢复、脏值与存储不可用时不崩、老记忆值仍有效；以及**关注池确实挂在「关注」页**而不是「个股」页 |
 | `test_night.py` | 夜盘口径：**窗口边界（含周日 20:00 那一场 —— 那天 weekday 是 6，处理不当会被当成周末）**、基准新鲜度守卫、涨跌幅算法与市值折算、成交价窗口校验、**没跑成时不许冻结收盘快照** |
 | `test_tunnel.py` | 固定链接：**用桩 cloudflared**（临时 HOME + 假二进制）在没有真实凭证的情况下验证产出的 `~/.cloudflared/config.yml` 与 launchd plist —— ingress 兜底规则**必须是最后一条**（否则 cloudflared 拒绝启动）、plist 参数顺序 `--config` 必须在 `run` 之前、幂等重跑（隧道已存在 / DNS 记录已存在都要当成功）、以及**非完整域名时报的是友好提示而不是 `unbound variable`** |
-| `test_duality.js` | 期股双面：区间边界是**自然日**（「过去 7 天」= 含今天的 7 天，不是 7 个交易日）、0% 基准取「区间开始前最后一个交易日」（取"区间内第一根"会让各条线起点对不齐）、勾选/取消后**卡片上仍要有涨跌幅**（变「—」会让人以为数据没了）、起止日颠倒时自动对调、「今天」取 `max(取数时间, 数据最后一天)` 而不是浏览器时钟、以及 schema/路由/菜单/图标的跨文件一致性、**分组机制**（从 payload.groups 取定义、渲染一律走 groupItems()、每条标的的 group 都在 GROUPS 里）与**真的切一次组看过滤对不对** |
+| `test_tunnel_watchdog.py` | 隧道看门狗：**完全离线**（桩 curl / 桩 launchctl + 注入 IP）逐条钉住判据 —— 200 一个 launchctl 都不调、1033 **恰好重建一次**且参数是 `kickstart -k gui/<uid>/<隧道标签>`、**回源 502 与「530 但非 1033」都绝不重启隧道**、距上次重建不足 600 秒被限速（退出码 3 区别于「没事做」的 0）、解析不到真实 IP 连探都不探、`--dry-run` 只留痕不动手、重建被拒与「重建后仍 1033」都如实退出 1（**不谎报成功**）；外加 `--install` 产出的 plist（带 `StartInterval`、**不带 `KeepAlive`**、指向脚本绝对路径）。⚠️ 断言「没有某个键」之前**必须先剔 XML 注释** —— 注释里正大光明写着"故意不写 KeepAlive" |
+| `test_duality.js` | 期股双面：区间边界是**自然日**（「过去 7 天」= 含今天的 7 天，不是 7 个交易日）、0% 基准取「区间开始前最后一个交易日」（取"区间内第一根"会让各条线起点对不齐）、勾选/取消后**卡片上仍要有涨跌幅**（变「—」会让人以为数据没了）、起止日颠倒时自动对调、「今天」取 `max(取数时间, 数据最后一天)` 而不是浏览器时钟、以及 schema/路由/菜单/图标的跨文件一致性、**分组机制**（从 payload.groups 取定义、渲染一律走 groupItems()、每条标的的 group 都在 GROUPS 里）与**把后加的三个分组各切一次、看过滤对不对**（橡胶组还专门验了「只剩 2 只」——它是唯一只有一只股票的分组，任何按 5~6 只写死的路径在这里都会露馅）|
 | `test_duality_render.js` | 期股双面**渲染路径**：SVG 是长字符串拼出来的，专查三类"浏览器默默不画、控制台也不报错"的事 —— 拼进 `undefined` / `NaN`、`<g>` 少一个闭合、长假后「过去 7 天」只剩 1 个交易日时**单点要退化成圆点并出黄条**（而不是一条隐形的线）；外加点范围/点标的真的会重画图表与表格（分组切换的渲染由预览用例那条覆盖，它跑的是真数据） |
 | `test_duality_source.py` | 期股双面**数据源链**（离线，用桩换掉真实源）：主源失败要落到备源、源抛意外异常也要换源、全链失败要报出每个源的原因、失败记忆让备源优先、**记忆过期后主源要回到原位**（不过期就是永久降级 —— 备源一直成功，主源永远等不到清零计数的那次成功）、涨跌幅**先算后截**（截断后第一根没有前收，会算出假的 0%）、每只标的都有备源；配置侧另守**分组**（每只都属于已定义的分组、每组有且只有一个期货、银组/铜组的成员就是用户点名那几只、**铜的单位是「美元/磅」而不是沿用金银的「美元/盎司」**）与**降级缓存的 group 对齐**。⚠️ 它把 `DUALITY_CACHE_PATH` 指到临时文件 —— 用例跑的是桩标的，写进生产那份降级缓存的话，三个源全挂时页面会把"测试股"当上次成功的行情端上来（2026-10-12 实测踩到） |
 | `test_duality_preview.js` | 「期股双面」**静态预览页**（`duality-preview.html`，由 `make_duality_preview.py` 生成）：抽出页内所有 `<script>` 按序执行，检查侧栏/页头/6 档时间范围/当前分组 6 只标的的勾选、SVG 出来了且没有 `undefined`/`NaN`、**切到白银组 / 铜组后勾选卡/图/表三处一起换成 5 只（且别组不残留）**、"长假黄条"按**快照实际形态**决定断言方向（是长假口就要点名 + 给出路，不是就得收起来）、切到 90 天每只都有 ≥2 个交易日。**代替浏览器**跑（headless Chrome 在工具会话里会卡死）；预览页不存在时跳过，不拖累全量自检 |
